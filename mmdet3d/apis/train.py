@@ -255,6 +255,9 @@ def train_detector(model,
             work_dir=cfg.work_dir,
             logger=logger,
             meta=meta))
+    
+    # ugly workaround to make cfg an attribute to runner for ema custom hook to access it
+    runner.cfg = cfg
 
     # an ugly workaround to make .log and .log.json filenames the same
     runner.timestamp = timestamp

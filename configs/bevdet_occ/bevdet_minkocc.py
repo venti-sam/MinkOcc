@@ -1,27 +1,5 @@
 # Copyright (c) Phigent Robotics. All rights reserved.
 
-# align_after_view_transfromation=False
-# ===> per class IoU of 6019 samples:
-# ===> others - IoU = 8.22
-# ===> barrier - IoU = 44.21
-# ===> bicycle - IoU = 10.34
-# ===> bus - IoU = 42.08
-# ===> car - IoU = 49.63
-# ===> construction_vehicle - IoU = 23.37
-# ===> motorcycle - IoU = 17.41
-# ===> pedestrian - IoU = 21.49
-# ===> traffic_cone - IoU = 19.7
-# ===> trailer - IoU = 31.33
-# ===> truck - IoU = 37.09
-# ===> driveable_surface - IoU = 80.13
-# ===> other_flat - IoU = 37.37
-# ===> sidewalk - IoU = 50.41
-# ===> terrain - IoU = 54.29
-# ===> manmade - IoU = 45.56
-# ===> vegetation - IoU = 39.59
-# ===> mIoU of 6019 samples: 36.01
-
-
 _base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
 # Global
 # For nuScenes we usually do 10-class detection
@@ -57,6 +35,8 @@ grid_config = {
 }
 
 voxel_size = [0.1, 0.1, 0.2]
+# z axis is a bit hard to adjust if ground is not flat, set as -2.6 for now, which means z axis is 0 - 20
+point_cloud_range = [-40.0, -40.0, -2.6, 40.0, 40.0, 5.4]
 
 numC_Trans = 32
 
@@ -66,6 +46,42 @@ model = dict(
     type='BEVStereo4DOCC',
     align_after_view_transfromation=False,
     num_adj=len(range(*multi_adj_frame_id_cfg)),
+    # add in lidar minkunet here 
+    lidar_backbone = dict(
+        type='TR3DMinkResNet',
+        in_channels=5,
+        depth=18,
+        pool = False,
+        num_stages = 4,
+        norm='batch',
+        num_planes=(32, 64, 128, 256)
+    ),
+    # add in lidar minkunet neck here 
+    lidar_neck = dict(
+        type='TR3DNeck',
+        in_channels=(32, 64, 128, 256),
+        out_channels=32,
+        strides=(8, 16, 32, 64),  # Strides from the backbone
+        loss_bce_weight = 1.0,
+    ),
+    
+    # add in voxelization code here, the method is derived from centerpoint.py (second)
+    pts_voxel_layer=dict(
+        max_num_points=20, 
+        point_cloud_range=point_cloud_range,
+        voxel_size=[0.4, 0.4, 0.4],  # xy size follow centerpoint
+        # max_voxels=(90000, 120000)),
+    ),
+    pts_voxel_encoder=dict(type='HardSimpleVFE', num_features=5),
+
+    
+    
+    
+    
+    
+    
+    
+    ###########################################
     img_backbone=dict(
         type='ResNet',
         depth=50,
@@ -155,7 +171,7 @@ train_pipeline = [
     dict(type='PointToMultiViewDepth', downsample=1, grid_config=grid_config),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
-        type='Collect3D', keys=['img_inputs', 'gt_depth', 'voxel_semantics',
+        type='Collect3D', keys=['img_inputs', 'points', 'gt_depth', 'voxel_semantics',
                                 'mask_lidar','mask_camera'])
 ]
 
@@ -187,7 +203,7 @@ test_pipeline = [
 ]
 
 input_modality = dict(
-    use_lidar=False,
+    use_lidar=True,
     use_camera=True,
     use_radar=False,
     use_map=False,
@@ -208,7 +224,7 @@ test_data_config = dict(
     ann_file=data_root + 'bevdetv3-nuscenes_infos_val.pkl')
 
 data = dict(
-    samples_per_gpu=4,
+    samples_per_gpu=1, # batch size
     workers_per_gpu=4,
     train=dict(
         data_root=data_root,

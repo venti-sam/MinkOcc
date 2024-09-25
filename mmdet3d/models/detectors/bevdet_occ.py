@@ -8,6 +8,11 @@ from mmcv.cnn.bricks.conv_module import ConvModule
 from torch import nn
 import numpy as np
 
+# additional imports
+from .. import builder
+import MinkowskiEngine as ME
+
+
 
 @DETECTORS.register_module()
 class BEVStereo4DOCC(BEVStereo4D):
@@ -19,8 +24,21 @@ class BEVStereo4DOCC(BEVStereo4D):
                  num_classes=18,
                  use_predicter=True,
                  class_wise=False,
+                 ## add in lidar backbone here
+                 lidar_backbone=None,
+                 ## add in lidar neck here
+                 lidar_neck=None,
+                 # add in voxelization method here
+                 
                  **kwargs):
         super(BEVStereo4DOCC, self).__init__(**kwargs)
+        # add in lidar backbone and necessary inits here
+        self.lidar_backbone = builder.build_backbone(lidar_backbone)
+        self.lidar_neck = builder.build_neck(lidar_neck)
+        ######################################
+        
+        
+        
         self.out_dim = out_dim
         out_channels = out_dim if use_predicter else num_classes
         self.final_conv = ConvModule(
@@ -117,19 +135,75 @@ class BEVStereo4DOCC(BEVStereo4D):
         Returns:
             dict: Losses of different branches.
         """
+        # init losses dictionary
+        losses = dict()
+
+        # process the occupancy grid
+        voxel_semantics = kwargs['voxel_semantics']
+        mask_camera = kwargs['mask_camera']
+        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+        # print(voxel_semantics.shape) # [batch, 200, 200, 16]
+        # remove class 17 for bce supervision in mink-lidarocc, then reshape it to a list[(n,4)]
+        # Shape of voxel_semantics_without_free: (4, 200, 200, 16)
+        batch_size = voxel_semantics.shape[0]  # 4
+
+        # Initialize an empty list to hold the results for each batch
+        coo_list = []
+
+        for b in range(batch_size):
+            current_voxel_grid = voxel_semantics[b]
+            mask = current_voxel_grid != 17            
+            coords = torch.argwhere(mask)
+            coo_list.append(coords)
+                
+
+
+        # voxelization of pointcloud
+        voxels, num_points, coors = self.voxelize(points)
+        # in coors, get the highest coord in column 2 and 3
+        # coors shape is (b, z, x, y) -> includes all batches of points
+        # Find the maximum value in the 2nd column (x-coordinate)
+        # try plotting the first batch coors to see what it looks like
+
+        # voxels shape is (num_voxels, max_points, 5) -> includes all batches of points
+        # num_points is the number of points across batches
+        # coors is the coordinates of the voxels with batch number included as first column
+        
+        # using hardsimplevfe from voxel_encoders to get voxel_features
+        # basically just averaging the feats from each point 
+        voxel_features = self.pts_voxel_encoder(voxels, num_points, coors)
+ 
+        # Create minkowski sparse tensor using coors and voxel_features
+        pts_sparse_tensor = ME.SparseTensor(
+            features=voxel_features, 
+            coordinates=coors, 
+            device=voxel_features.device)
+        cm = pts_sparse_tensor.coordinate_manager
+        target_key, _ = cm.insert_and_map(
+                ME.utils.batched_coordinates(coo_list).to(voxel_features.device),
+                string_id="target",
+        )
+        # pass the sparse tensor through the lidar backbone
+        pts_feats = self.lidar_backbone(pts_sparse_tensor)
+
+        # pass the pts_feats through the lidar neck
+        out_cls, targets, pts_feat = self.lidar_neck(pts_feats, target_key)
+        
+        #  BCE Loss calculation for scene completion point existence
+        bce_loss = self.lidar_neck.get_bce_loss(out_cls, targets)
+        losses['loss_bce'] = bce_loss
+
+
         img_feats, pts_feats, depth = self.extract_feat(
             points, img=img_inputs, img_metas=img_metas, **kwargs)
         gt_depth = kwargs['gt_depth']
-        losses = dict()
         loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
         losses['loss_depth'] = loss_depth
 
         occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
-        voxel_semantics = kwargs['voxel_semantics']
-        mask_camera = kwargs['mask_camera']
-        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+        
         loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
         losses.update(loss_occ)
         return losses

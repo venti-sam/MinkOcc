@@ -92,6 +92,7 @@ class BEVDet(CenterPoint):
         img = self.prepare_inputs(img)
         x, _ = self.image_encoder(img[0])
         x, depth = self.img_view_transformer([x] + img[1:7])
+        
         x = self.bev_encoder(x)
         return [x], depth
 
@@ -702,5 +703,8 @@ class BEVStereo4D(BEVDepth4D):
                                         sensor2keyegos[self.num_frame-2-adj_id]],
                                        bda)
         bev_feat = torch.cat(bev_feat_list, dim=1)
-        x = self.bev_encoder(bev_feat)
+        
+        print(bev_feat.shape)
+        ppp
+        # x = self.bev_encoder(bev_feat)
         return [x], depth_key_frame

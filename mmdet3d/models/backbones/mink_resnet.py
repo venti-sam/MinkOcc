@@ -11,7 +11,7 @@ except ImportError:
 
 import torch.nn as nn
 
-from mmdet3d.models.builder import BACKBONES
+from ..builder import BACKBONES
 
 
 @BACKBONES.register_module()
@@ -26,6 +26,14 @@ class MinkResNet(nn.Module):
         pool (bool, optional): Add max pooling after first conv if True.
             Default: True.
     """
+    # Updated to support 5 stages
+    # arch_settings = {
+    #     18: (BasicBlock, (2, 2, 2, 2, 2)),   # Adding an extra stage
+    #     34: (BasicBlock, (3, 4, 6, 3, 3)),   # Extra stage with 3 blocks
+    #     50: (Bottleneck, (3, 4, 6, 6, 3)),   # Same for deeper models
+    #     101: (Bottleneck, (3, 4, 23, 3, 3)),
+    #     152: (Bottleneck, (3, 8, 36, 3, 3))
+    # }
     arch_settings = {
         18: (BasicBlock, (2, 2, 2, 2)),
         34: (BasicBlock, (3, 4, 6, 3)),
@@ -44,11 +52,12 @@ class MinkResNet(nn.Module):
         self.num_stages = num_stages
         self.pool = pool
 
-        self.inplanes = 64
+        self.inplanes = 32
         self.conv1 = ME.MinkowskiConvolution(
             in_channels, self.inplanes, kernel_size=3, stride=2, dimension=3)
         # May be BatchNorm is better, but we follow original implementation.
-        self.norm1 = ME.MinkowskiInstanceNorm(self.inplanes)
+        # self.norm1 = ME.MinkowskiInstanceNorm(self.inplanes)
+        self.norm1 = ME.MinkowskiBatchNorm(self.inplanes)
         self.relu = ME.MinkowskiReLU(inplace=True)
         if self.pool:
             self.maxpool = ME.MinkowskiMaxPooling(
@@ -57,7 +66,7 @@ class MinkResNet(nn.Module):
         for i, num_blocks in enumerate(stage_blocks):
             setattr(
                 self, f'layer{i + 1}',
-                self._make_layer(block, 64 * 2**i, stage_blocks[i], stride=2))
+                self._make_layer(block, 32 * 2**i, stage_blocks[i], stride=2))
 
     def init_weights(self):
         for m in self.modules():

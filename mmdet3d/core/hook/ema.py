@@ -11,6 +11,8 @@ from mmcv.runner.hooks import HOOKS, Hook
 
 from mmdet3d.core.hook.utils import is_parallel
 
+# need mmdet build model
+
 __all__ = ['ModelEMA']
 
 
@@ -28,7 +30,7 @@ class ModelEMA:
     of model init, GPU assignment and distributed training wrappers.
     """
 
-    def __init__(self, model, decay=0.9999, updates=0):
+    def __init__(self, model, cfg, decay=0.9999, updates=0):
         """
         Args:
             model (nn.Module): model to apply EMA.
@@ -36,9 +38,23 @@ class ModelEMA:
             updates (int): counter of EMA updates.
         """
         # Create EMA(FP32)
-        self.ema_model = deepcopy(model).eval()
-        self.ema = self.ema_model.module.module if is_parallel(
-            self.ema_model.module) else self.ema_model.module
+        # self.ema_model = deepcopy(model).eval() # cannot deepcopy due to minkowskiengine not compatible with pytorch pickle
+        # self.ema_model = model.eval()
+        
+        # Build EMA model from cfg
+        from mmdet3d.models import build_model
+
+        self.ema_model = build_model(
+            cfg.model,
+            train_cfg=cfg.get('train_cfg'),
+            test_cfg=cfg.get('test_cfg')
+        )
+        self.ema_model.to(next(model.parameters()).device)
+        self.ema_model.eval()
+        # self.ema_model.load_state_dict(model.state_dict())
+        
+        self.ema = self.ema_model.module if is_parallel(
+            self.ema_model) else self.ema_model
         self.updates = updates
         # decay exponential ramp (to help early epochs)
         self.decay = lambda x: decay * (1 - math.exp(-x / 2000))
@@ -83,7 +99,14 @@ class MEGVIIEMAHook(Hook):
                 bn_model_list.append(model_ref)
                 bn_model_dist_group_list.append(model_ref.process_group)
                 model_ref.process_group = None
-        runner.ema_model = ModelEMA(runner.model, self.decay)
+                
+                
+        # access cfg to recreate model for ModelEMA
+        cfg = runner.cfg
+        if cfg is None:
+            raise ValueError('cfg is not found in runner.meta')
+        
+        runner.ema_model = ModelEMA(runner.model, cfg, self.decay)
 
         for bn_model, dist_group in zip(bn_model_list,
                                         bn_model_dist_group_list):
