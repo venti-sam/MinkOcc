@@ -28,13 +28,19 @@ class TR3DNeck(BaseModule):
         strides (tuple[int]): Strides for each input tensor.
     """
 
-    def __init__(self, in_channels: Tuple[int], out_channels: int, strides: Tuple[int], loss_bce_weight=1.0):
+    def __init__(self, 
+                 in_channels: Tuple[int], 
+                 out_channels: int, 
+                 strides: Tuple[int], 
+                 loss_bce_weight=1.0,
+                 is_generative=False):
         super(TR3DNeck, self).__init__()
         # Store the strides for each level
         self.strides = strides
         # Store the desired output channels
         self.out_channels = out_channels
-        
+        # if use generative convolution transpose
+        self.is_generative = is_generative
         # BCE loss weight
         self.loss_bce_weight = loss_bce_weight
         self.bce_criterion = nn.BCEWithLogitsLoss()
@@ -51,7 +57,8 @@ class TR3DNeck(BaseModule):
         # Lists to hold upsampling layers and fusion convolutions
         self.upsample_layers = nn.ModuleList()
         # List to hold classification layers
-        self.classification_layer = nn.ModuleList()
+        if self.is_generative:
+            self.classification_layer = nn.ModuleList()
         # self.fuse_convs = nn.ModuleList()
         # Loop over levels from deepest to the highest resolution
         for i in range(num_levels - 1, 0, -1):
@@ -65,36 +72,38 @@ class TR3DNeck(BaseModule):
                 self._make_block(
                     in_channels=in_channels[i],         # Input channels from current level
                     out_channels=in_channels[i - 1],    # Output channels to match higher level
-                    generative=True,                    # Use generative convolution transpose
+                    generative=self.is_generative,      # Use generative convolution transpose
                     stride=up_factor,                  # Upsampling factor
                     kernel_size = kernel_size
                 )
             )
-            self.classification_layer.append(
-                ME.MinkowskiConvolution(
-                    in_channels[i - 1],     # Input channels from the higher resolution level
-                    1,                     # Output channels (1 for binary classification)
-                    kernel_size=1,
-                    stride=1,
-                    dimension=3
+            if self.is_generative:
+                self.classification_layer.append(
+                    ME.MinkowskiConvolution(
+                        in_channels[i - 1],     # Input channels from the higher resolution level
+                        1,                     # Output channels (1 for binary classification)
+                        kernel_size=1,
+                        stride=1,
+                        dimension=3
+                    )
                 )
-            )
-            # Fusion convolution: simple 1x1x1 convolution without altering channel dimensions
-            # self.fuse_convs.append(
-            #     ME.MinkowskiConvolution(
-            #         in_channels[i - 1] * 2,  # Input channels after concatenation
-            #         in_channels[i - 1],      # Output channels (same as higher level)
-            #         kernel_size=1,
-            #         stride=1,
-            #         dimension=3
-            #     )
-            # )
+        conv = ME.MinkowskiGenerativeConvolutionTranspose if self.is_generative \
+            else ME.MinkowskiConvolutionTranspose
         # Final convolution to adjust channels to out_channels (e.g., 32)
         self.final_conv = nn.Sequential(
-            ME.MinkowskiConvolution(
+            conv(
                 in_channels[0],     # Input channels from the highest resolution level
                 self.out_channels,  # Desired number of output channels
-                kernel_size=1,
+                kernel_size=2,
+                stride=2,
+                dimension=3
+            ),
+            ME.MinkowskiBatchNorm(self.out_channels),
+            ME.MinkowskiReLU(inplace=True),
+            ME.MinkowskiConvolution(
+                self.out_channels,   
+                self.out_channels, 
+                kernel_size=3,
                 stride=1,
                 dimension=3
             ),
@@ -102,8 +111,16 @@ class TR3DNeck(BaseModule):
             ME.MinkowskiReLU(inplace=True)
         )
         
-        # Pruning layer
-        self.pruning = ME.MinkowskiPruning()
+        if self.is_generative:
+            self.final_cls = ME.MinkowskiConvolution(
+                self.out_channels,     # Input channels from the highest resolution level
+                1,                     # Output channels (1 for binary classification)
+                kernel_size=1,
+                stride=1,
+                dimension=3
+            )
+            # Pruning layer
+            self.pruning = ME.MinkowskiPruning()
 
     def init_weights(self):
         """Initialize weights."""
@@ -157,28 +174,38 @@ class TR3DNeck(BaseModule):
             out = up_feat + x[i - 1]
             
             # add in the classification pruning here
-            
-            
-            out_curr_cls = self.classification_layer[idx](out)
-            keep = (out_curr_cls.F > 0).squeeze()
-            target = self.get_target(out, target_key)
-            targets.append(target)
-            out_cls.append(out_curr_cls)
-            if self.training:
-                keep = keep + target
-            if keep.sum() > 0:
-                out = self.pruning(out, keep)
-            
+            if self.is_generative:
+                out_curr_cls = self.classification_layer[idx](out)
+                keep = (out_curr_cls.F > 0).squeeze()
+                target = self.get_target(out, target_key)
+                targets.append(target)
+                out_cls.append(out_curr_cls)
+                if self.training:
+                    keep = keep + target
+                if keep.sum() > 0:
+                    out = self.pruning(out, keep)
+                
             
             
             # Apply fusion convolution (1x1x1 conv) to the concatenated features
             # out = self.fuse_convs[idx](out)
         # Apply final convolution to adjust channels to out_channels
         out = self.final_conv(out)
+        
+        # final pruning
+        if self.is_generative:
+            out_curr_cls = self.final_cls(out)
+            keep = (out_curr_cls.F > 0).squeeze()
+            target = self.get_target(out, target_key)
+            targets.append(target)
+            out_cls.append(out_curr_cls)
+            if keep.sum() > 0:
+                out = self.pruning(out, keep)
+        
+        # if not generative, out-cls and targets will be [],[]
         return out_cls, targets, out
 
     def get_bce_loss(self, out_cls, targets):
-        
         device = out_cls[0].device
         num_layers, bce_loss = len(out_cls), 0
         bce_losses = []

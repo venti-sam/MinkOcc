@@ -36,7 +36,7 @@ class MinkResNet(nn.Module):
     # }
     arch_settings = {
         18: (BasicBlock, (2, 2, 2, 2)),
-        34: (BasicBlock, (3, 4, 6, 3)),
+        34: (BasicBlock, (2, 3, 4, 2)),
         50: (Bottleneck, (3, 4, 6, 3)),
         101: (Bottleneck, (3, 4, 23, 3)),
         152: (Bottleneck, (3, 8, 36, 3))
@@ -52,9 +52,9 @@ class MinkResNet(nn.Module):
         self.num_stages = num_stages
         self.pool = pool
 
-        self.inplanes = 32
+        self.inplanes = 16
         self.conv1 = ME.MinkowskiConvolution(
-            in_channels, self.inplanes, kernel_size=3, stride=2, dimension=3)
+            in_channels, self.inplanes, kernel_size=3, stride=1, dimension=3)
         # May be BatchNorm is better, but we follow original implementation.
         # self.norm1 = ME.MinkowskiInstanceNorm(self.inplanes)
         self.norm1 = ME.MinkowskiBatchNorm(self.inplanes)

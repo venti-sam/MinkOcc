@@ -36,16 +36,20 @@ class TR3DMinkResNet(MinkResNet):
                  depth: int,
                  in_channels: int,
                  num_stages: int = 4,
+                 in_planes: int = 16,
                  pool: bool = True,
                  norm: str = 'instance',
                  num_planes: Tuple[int] = (64, 128, 256, 512)):
         super(TR3DMinkResNet, self).__init__(depth, in_channels, num_stages,
                                              pool)
         block, stage_blocks = self.arch_settings[depth]
-        self.inplanes = 32
+        self.inplanes = in_planes
+        self.conv1 = ME.MinkowskiConvolution(
+            in_channels, self.inplanes, kernel_size=3, stride=1, dimension=3)
         norm_layer = ME.MinkowskiInstanceNorm if norm == 'instance' else \
             ME.MinkowskiBatchNorm
         self.norm1 = norm_layer(self.inplanes)
+
 
         for i in range(len(stage_blocks)):
             setattr(
