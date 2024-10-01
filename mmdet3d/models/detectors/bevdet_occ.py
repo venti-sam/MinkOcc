@@ -53,13 +53,13 @@ class BEVStereo4DOCC(BEVStereo4D):
         self.occ_neck = builder.build_neck(occ_neck)
         ######################################
         # declare COO format coordinates from 200x200x16 grid
-        z_voxel, x_voxel, y_voxel = 16, 200, 200
+        # z_voxel, x_voxel, y_voxel = 16, 200, 200
         # Generate the voxel coordinates once (since they are the same for all batches)
-        z_coords, x_coords, y_coords = torch.meshgrid(
-            torch.arange(z_voxel), torch.arange(x_voxel), torch.arange(y_voxel), indexing='ij'
-        )
-        self.COO_format_coords = torch.stack([x_coords, y_coords, z_coords], dim=-1).reshape(-1, 3)  # shape (num_voxels, 3)
-        
+        # z_coords, x_coords, y_coords = torch.meshgrid(
+            # torch.arange(z_voxel), torch.arange(x_voxel), torch.arange(y_voxel), indexing='ij'
+        # )
+        # self.COO_format_coords = torch.stack([x_coords, y_coords, z_coords], dim=-1).reshape(-1, 3)  # shape (num_voxels, 3)
+        self.GRID_SIZE = (200, 200, 16)
         
         self.out_dim = out_dim
         # out_channels = out_dim if use_predicter else num_classes
@@ -92,9 +92,43 @@ class BEVStereo4DOCC(BEVStereo4D):
         self.class_wise = class_wise
         self.align_after_view_transfromation = False
 
-    def loss_single(self,voxel_semantics,mask_camera,preds):
+    def loss_single(self,voxel_semantics_coo_feats, masked_camera_coo_feats,preds):
+        """_summary_
+
+        Args:
+            voxel_semantics_coo_feats (torch.tensor): (200x200x16xbatch, 1), voxel semantics class labels
+            masked_camera_list_feats (torch.tensor]): (200x200x16xbatch, 1), voxel semantics class labels
+            preds (SparseTensor): COO (200x200x16, 3) for coords, (200x200x16, num_classes) for feats
+
+        Returns:
+            tensor: cross entropy loss
+        """
         loss_ = dict()
-        voxel_semantics=voxel_semantics.long()
+        list_pred_coords, list_pred_feats = preds.decomposed_coordinates_and_features
+        if self.use_mask:
+            # Stack the list of prediction features into a single tensor
+            valid_counts = (masked_camera_coo_feats != -100).sum()
+            pred_feats_stacked = torch.cat(list_pred_feats, dim=0)
+            masked_camera_coo_feats = masked_camera_coo_feats.view(-1).long()
+            # Ensure prediction features dtype is correct for loss calculation
+            pred_feats_stacked = pred_feats_stacked.float()
+            # Calculate the cross-entropy loss
+            loss_occ = self.loss_occ(pred_feats_stacked, masked_camera_coo_feats, avg_factor=valid_counts)
+            loss_['loss_occ'] = loss_occ
+        else:        
+            # Stack the list of prediction features into a single tensor
+            pred_feats_stacked = torch.cat(list_pred_feats, dim=0)  # Stack along the first dimension (n, num_classes)
+            # Ensure voxel_semantics_coo_feats is reshaped to match the flattened predictions
+            voxel_semantics_coo_feats = voxel_semantics_coo_feats.view(-1).long()  # Flatten and ensure dtype is long for labels
+            # Ensure prediction features dtype is correct for loss calculation
+            pred_feats_stacked = pred_feats_stacked.float()  # Convert to float if necessary (for cross-entropy)
+            # Calculate the cross-entropy loss
+            loss_occ = self.loss_occ(pred_feats_stacked, voxel_semantics_coo_feats)
+            loss_['loss_occ'] = loss_occ
+
+        return loss_
+
+
         if self.use_mask:
             mask_camera = mask_camera.to(torch.int32)
             voxel_semantics=voxel_semantics.reshape(-1)
@@ -246,23 +280,52 @@ class BEVStereo4DOCC(BEVStereo4D):
         mask_camera = kwargs['mask_camera']
         assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
         # print(voxel_semantics.shape) # [batch, 200, 200, 16]
-        # remove class 17 for bce supervision in mink-lidarocc, then reshape it to a list[(n,4)]
-        # Shape of voxel_semantics_without_free: (4, 200, 200, 16)
+
+        # Clone voxel_semantics and apply mask for camera, set class 18 where mask_camera == 0
+        masked_semantics = voxel_semantics.clone().to(torch.int8)
+        masked_semantics[mask_camera == 0] = -100  # Set class to -100 where mask_camera == 0
+
+        
+        # valid_counts = (masked_semantics != -100).sum()
+        # print(f"Number of valid voxels: {valid_counts}")
         batch_size = voxel_semantics.shape[0]  # 4
 
-        # Initialize an empty list to hold the results for each batch
-        coo_list_gt = []
+        # Initialize lists to hold the results for each batch
+        coo_list_gt = []  # List of coordinates (excluding class 17)
+        voxel_semantics_coo_feats = []  # List of features for voxel semantics (corresponding to all coordinates, no mask)
+        mask_camera_coo_feats = []  # List of features for mask_camera (only features for valid coords)
 
         for b in range(batch_size):
+            # Process voxel semantics for the current batch
             current_voxel_grid = voxel_semantics[b]
-            mask = current_voxel_grid != 17            
-            coords = torch.argwhere(mask)
-            # rotate by 90 degrres coords
-            # rotated_coords = coords.clone()  # Clone to avoid modifying original tensor
-            # rotated_coords[:, 0] = coords[:, 1]  # x_new = y
-            # rotated_coords[:, 1] = -coords[:, 0]  # y_new = -x
+            
+            # Mask to remove class 17 and get valid coordinates
+            mask = current_voxel_grid != 17
+            coords = torch.argwhere(mask)  # (n, 3), get coordinates where class is not 17
+            
+            # Store valid coordinates in coo_list_gt
             coo_list_gt.append(coords)
-    
+            
+            # For voxel semantics features, reshape into (200*200*16, 1) and store all features
+            all_features = current_voxel_grid.view(-1, 1)  # (200*200*16, 1)
+            voxel_semantics_coo_feats.append(all_features)  # Store the full voxel features regardless of mask
+
+            # Now process the mask_camera
+            current_masked_semantics = masked_semantics[b]            
+            mask_features = current_masked_semantics.view(-1, 1)  # Reshape all features into (200*200*16, 1)
+            mask_camera_coo_feats.append(mask_features)  # Store only valid features for mask_camera
+
+        
+        # stack voxel_semantics_coo_feats
+        voxel_semantics_coo_feats = torch.vstack(voxel_semantics_coo_feats)
+        mask_camera_coo_feats = torch.vstack(mask_camera_coo_feats)
+        
+
+        
+        # Final results:
+        # coo_list_gt: Coordinates excluding class 17 (voxel_semantics)
+        # voxel_semantics_coo_feats: Full features for voxel semantics (without masking)
+        # mask_camera_coo_feats: Full features for mask_camera (-100 for invalid voxels)
 
         # voxelization of pointcloud
         voxels, num_points, coors = self.voxelize(points)
@@ -306,7 +369,30 @@ class BEVStereo4DOCC(BEVStereo4D):
 
         # constrain pts_feats to within 200x200x16 grid (self.COO_format_coords is the COO format of this) 
         pts_feat = self.pad_lidar_feats(pts_feat)
+        # pts_feat is a sparse tensor
+        # get the coordinates and features
+        # pts_feat_coords, pts_feat_feats = pts_feat.decomposed_coordinates_and_features
+        
+        
+        # input_coords = pts_feat_coords[0].cpu().numpy()
+        
+        # from plyfile import PlyData, PlyElement
+    
+        # # Prepare the data for PLY file (only coordinates)
+        # vertex_data = [(x, y, z) for x, y, z in input_coords]
 
+        # # Define the PLY elements (only x, y, z coordinates)
+        # vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4')]
+
+        # # Create the PLY structure
+        # ply_elements = PlyElement.describe(np.array(vertex_data, dtype=vertex_dtype), 'vertex')
+
+        # # Save to a PLY file
+        # ply_data = PlyData([ply_elements], text=True)
+        # ply_data.write('pts_image.ply')
+        
+        
+        # ppp
        
         img_feats, _, depth = self.extract_feat(
             points, img=img_inputs, img_metas=img_metas, **kwargs)
@@ -318,7 +404,7 @@ class BEVStereo4DOCC(BEVStereo4D):
         # pts feat COO (n, 3) coords and (n, 32) feats 
         channels = img_feats.shape[1]    # number of channels
 
-        coo_list = [self.COO_format_coords for _ in range(batch_size)]  # Create a list where each entry is the same `coords` tensor
+        # coo_list = [self.COO_format_coords for _ in range(batch_size)]  # Create a list where each entry is the same `coords` tensor
         feats_list = []
         for b in range(batch_size):
             current_voxel_grid = img_feats[b]  # shape (c, z_voxel, x_voxel, y_voxel)
@@ -331,39 +417,14 @@ class BEVStereo4DOCC(BEVStereo4D):
         # create sparse tensor
         img_sparse_tensor = ME.SparseTensor(
             features=stacked_feats, 
-            coordinates=ME.utils.batched_coordinates(coo_list), 
+            # coordinates=ME.utils.batched_coordinates(coo_list), 
             device=stacked_feats.device,
-            coordinate_manager=pts_feat.coordinate_manager
+            coordinate_manager=pts_feat.coordinate_manager,
+            coordinate_map_key=pts_feat.coordinate_map_key
         )
 
         fused_feats = self.sparse_fusion(img_sparse_tensor, pts_feat)
-            #  save the pts_feat to a .ply file
-            # pts_feat is a sparse tensor
-            # get the coordinates and features
-            # pts_feat_coords, pts_feat_feats = img_sparse_tensor.decomposed_coordinates_and_features
             
-            
-            # input_coords = pts_feat_coords[0].cpu().numpy()
-            
-            # from plyfile import PlyData, PlyElement
-        
-            # # Prepare the data for PLY file (only coordinates)
-            # vertex_data = [(x, y, z) for x, y, z in input_coords]
-
-            # # Define the PLY elements (only x, y, z coordinates)
-            # vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4')]
-
-            # # Create the PLY structure
-            # ply_elements = PlyElement.describe(np.array(vertex_data, dtype=vertex_dtype), 'vertex')
-
-            # # Save to a PLY file
-            # ply_data = PlyData([ply_elements], text=True)
-            # ply_data.write('pts_image.ply')
-            
-            
-            # ppp
-            
-        # pass fused feats through Mink-ResUnet for 3D semantic segmentation
         
 
         
@@ -371,13 +432,16 @@ class BEVStereo4DOCC(BEVStereo4D):
         loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
         losses['loss_depth'] = loss_depth
         
+        # pass fused feats through Mink-ResUnet for 3D semantic segmentation
         occ_preds = self.occ_backbone(fused_feats)
-        occ_pred = self.occ_neck(occ_preds)
+        _, _, occ_pred = self.occ_neck(occ_preds)
+        
 
         # occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
-        
-        loss_occ = self.loss_single(voxel_semantics, mask_camera, occ_pred)
+            
+
+        loss_occ = self.loss_single(voxel_semantics_coo_feats, mask_camera_coo_feats, occ_pred)
         losses.update(loss_occ)
         return losses

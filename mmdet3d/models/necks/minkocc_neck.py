@@ -151,12 +151,12 @@ class TR3DNeck(BaseModule):
         return target
 
 
-    def forward(self, x: List[SparseTensor], target_key) -> SparseTensor:
+    def forward(self, x: List[SparseTensor], target_key=None) -> SparseTensor:
         """Forward pass.
 
         Args:
             x (list[SparseTensor]): Features from the backbone.
-            target_key : the coordinate key of the targets in the batch
+            target_key : The coordinate key of the targets in the batch (always provided if is_generative).
 
         Returns:
             SparseTensor: Output feature from the neck.
@@ -164,45 +164,57 @@ class TR3DNeck(BaseModule):
         # Start from the deepest level's features
         out = x[-1]
         out_cls, targets = [], []
+        
         # Iterate from deepest level to highest resolution level
         for i in range(len(x) - 1, 0, -1):
             idx = len(x) - 1 - i  # Indexing for upsample_layers and fuse_convs
+            
             # Upsample current output to match resolution and channels of higher level
             up_feat = self.upsample_layers[idx](out)
-            # Concatenate upsampled features with features from higher resolution level
-            # out = ME.cat(up_feat, x[i - 1])
+            
+            # Fuse upsampled features with features from higher resolution level
             out = up_feat + x[i - 1]
             
-            # add in the classification pruning here
+            # Add classification pruning logic for generative models
             if self.is_generative:
+                # Compute classification for the current level
                 out_curr_cls = self.classification_layer[idx](out)
-                keep = (out_curr_cls.F > 0).squeeze()
+                keep = (out_curr_cls.F > 0).squeeze()  # Binary mask for pruning
+                
+                # Target is always available if the model is generative
                 target = self.get_target(out, target_key)
                 targets.append(target)
                 out_cls.append(out_curr_cls)
+                
+                # During training, add target information to the keep mask
                 if self.training:
                     keep = keep + target
+                
+                # Prune features based on the keep mask
                 if keep.sum() > 0:
                     out = self.pruning(out, keep)
-                
             
-            
-            # Apply fusion convolution (1x1x1 conv) to the concatenated features
+            # Apply fusion convolution (if needed)
             # out = self.fuse_convs[idx](out)
+        
         # Apply final convolution to adjust channels to out_channels
         out = self.final_conv(out)
         
-        # final pruning
+        # Final classification pruning (for generative models)
         if self.is_generative:
             out_curr_cls = self.final_cls(out)
             keep = (out_curr_cls.F > 0).squeeze()
+            
+            # Target is always available for final pruning step
             target = self.get_target(out, target_key)
             targets.append(target)
             out_cls.append(out_curr_cls)
+            
+            # Prune features based on final keep mask
             if keep.sum() > 0:
                 out = self.pruning(out, keep)
         
-        # if not generative, out-cls and targets will be [],[]
+        # If not generative, out_cls and targets will remain as empty lists
         return out_cls, targets, out
 
     def get_bce_loss(self, out_cls, targets):
