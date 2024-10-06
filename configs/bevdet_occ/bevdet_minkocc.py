@@ -78,12 +78,12 @@ model = dict(
 
     
     # add in sparse fusion (modelled from openoccupancy adaptive fusion)
-    sparse_fusion=dict(
-        type='SparseFusion',
-        out_channels=16,
-        img_in_channels=64,
-        pts_in_channels=32
-    ),
+    # sparse_fusion=dict(
+    #     type='SparseFusion',
+    #     out_channels=16,
+    #     img_in_channels=64,
+    #     pts_in_channels=32
+    # ),
     
     
     
@@ -127,25 +127,25 @@ model = dict(
     ######################################################
     # Multo- modal semantic segmentation
     # add in lidar minkunet here 
-    occ_backbone = dict(
-        type='TR3DMinkResNet',
-        in_channels=16,
-        depth=18,
-        pool = False,
-        num_stages = 4,
-        in_planes = 32, 
-        norm='batch',
-        num_planes=(64, 128, 256, 512)
-    ),
-    # add in lidar minkunet neck here 
-    occ_neck = dict(
-        type='TR3DNeck',
-        in_channels=(64, 128, 256, 512),
-        out_channels=32,
-        strides=(4, 8, 16, 32),  # Strides from the backbone
-        # loss_bce_weight = 1.0,
-        is_generative=False
-    ),
+    # occ_backbone = dict(
+    #     type='TR3DMinkResNet',
+    #     in_channels=16,
+    #     depth=18,
+    #     pool = False,
+    #     num_stages = 4,
+    #     in_planes = 32, 
+    #     norm='batch',
+    #     num_planes=(64, 128, 256, 512)
+    # ),
+    # # add in lidar minkunet neck here 
+    # occ_neck = dict(
+    #     type='TR3DNeck',
+    #     in_channels=(64, 128, 256, 512),
+    #     out_channels=32,
+    #     strides=(4, 8, 16, 32),  # Strides from the backbone
+    #     # loss_bce_weight = 1.0,
+    #     is_generative=False
+    # ),
     
     # img_bev_encoder_backbone=dict(
     #     type='CustomResNet3D',
@@ -216,6 +216,7 @@ test_pipeline = [
          bda_aug_conf=bda_aug_conf,
          classes=class_names,
          is_train=False),
+    dict(type = 'LoadOccGTFromFile'),
     dict(
         type='LoadPointsFromFile',
         coord_type='LIDAR',
@@ -232,7 +233,7 @@ test_pipeline = [
                 type='DefaultFormatBundle3D',
                 class_names=class_names,
                 with_label=False),
-            dict(type='Collect3D', keys=['points', 'img_inputs'])
+            dict(type='Collect3D', keys=['points', 'img_inputs', 'voxel_semantics', 'mask_camera'])
         ])
 ]
 

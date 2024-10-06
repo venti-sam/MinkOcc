@@ -47,10 +47,10 @@ class BEVStereo4DOCC(BEVStereo4D):
         self.lidar_backbone = builder.build_backbone(lidar_backbone)
         self.lidar_neck = builder.build_neck(lidar_neck)
         # add in sparse tensor fuser here
-        self.sparse_fusion = builder.build_fusion_layer(sparse_fusion)
+        # self.sparse_fusion = builder.build_fusion_layer(sparse_fusion)
         # add in occ backbone and necessary inits here
-        self.occ_backbone = builder.build_backbone(occ_backbone)
-        self.occ_neck = builder.build_neck(occ_neck)
+        # self.occ_backbone = builder.build_backbone(occ_backbone)
+        # self.occ_neck = builder.build_neck(occ_neck)
         ######################################
         # declare COO format coordinates from 200x200x16 grid
         # z_voxel, x_voxel, y_voxel = 16, 200, 200
@@ -151,16 +151,73 @@ class BEVStereo4DOCC(BEVStereo4D):
                     rescale=False,
                     **kwargs):
         """Test function without augmentaiton."""
-        img_feats, _, _ = self.extract_feat(
-            points, img=img, img_metas=img_metas, **kwargs)
-        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
-        # bncdhw->bnwhdc
-        if self.use_predicter:
-            occ_pred = self.predicter(occ_pred)
-        occ_score=occ_pred.softmax(-1)
-        occ_res=occ_score.argmax(-1)
-        occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
-        return [occ_res]
+        voxel_semantics = kwargs['voxel_semantics']
+        # mask_camera = kwargs['mask_camera']
+        assert voxel_semantics[0].min() >= 0 and voxel_semantics[0].max() <= 17
+        
+        batch_size = voxel_semantics[0].shape[0]  # 4
+        coo_list_gt = []  # List of coordinates (excluding class 17)
+        
+        for b in range(batch_size):
+            current_voxel_grid = voxel_semantics[0][b]
+            mask = current_voxel_grid != 17
+            coords = torch.argwhere(mask)
+            coo_list_gt.append(coords)
+        
+        voxels, num_points, coors = self.voxelize(points)
+        coors[:, 2] = 200 - coors[:, 2]  # Reverse the x direction
+        coors = coors[:, [0, 2, 3, 1]]
+        voxel_features = self.pts_voxel_encoder(voxels, num_points, coors)
+        pts_sparse_tensor = ME.SparseTensor(
+            features=voxel_features, 
+            coordinates=coors, 
+            device=voxel_features.device)
+        cm = pts_sparse_tensor.coordinate_manager
+        target_key, _ = cm.insert_and_map(
+                ME.utils.batched_coordinates(coo_list_gt).to(voxel_features.device),
+                string_id="target",
+        )
+        pts_feats = self.lidar_backbone(pts_sparse_tensor)
+        out_cls, targets, pts_feat = self.lidar_neck(pts_feats, target_key)
+
+
+        # convert pts_feat from sparse tensor to 200x200x16 grid format with batch size 1
+        pts_coord, pts_feat = pts_feat.decomposed_coordinates_and_features
+        pts_coord = pts_coord[0]
+        pts_feat = pts_feat[0]
+        # print(pts_feat.shape)
+        x = pts_coord[:, 0].long()
+        y = pts_coord[:, 1].long()
+        z = pts_coord[:, 2].long()
+        channel_size = pts_feat.shape[1]
+        grid = torch.zeros((channel_size, 200, 200, 16), dtype = pts_feat.dtype, device=pts_feat.device)
+        grid[:, x, y, z] = pts_feat.t()
+
+        # Step 1: Take softmax over channel 0 (the channel dimension)
+        grid_softmax = torch.softmax(grid, dim=0)  # Shape remains (32, 200, 200, 16)
+
+        # Step 2: Take argmax over channel 0
+        grid_argmax = grid_softmax.argmax(dim=0)  # Shape becomes (200, 200, 16)
+        # make sure argmax is within 0-17
+        # grid_argmax = torch.clamp(grid_argmax, 0, 17)
+
+        # Step 3: Convert to uint8 and ensure the shape is (200, 200, 16)
+        grid_uint8 = grid_argmax.cpu().numpy().astype(np.uint8)  # Shape: (200, 200, 16)
+        
+        
+        
+        
+        
+        # img_feats, _, _ = self.extract_feat(
+        #     points, img=img, img_metas=img_metas, **kwargs)
+        # occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
+        # # bncdhw->bnwhdc
+        # if self.use_predicter:
+        #     occ_pred = self.predicter(occ_pred)
+        # occ_score=occ_pred.softmax(-1)
+        # occ_res=occ_score.argmax(-1)
+        # occ_res = occ_res.squeeze(dim=0).cpu().numpy().astype(np.uint8)
+        return [grid_uint8]
 
     def pad_lidar_feats(self, pts_feat):
         batch_coords_list, batch_feats_list = pts_feat.decomposed_coordinates_and_features
@@ -366,7 +423,7 @@ class BEVStereo4DOCC(BEVStereo4D):
         bce_loss = self.lidar_neck.get_bce_loss(out_cls, targets)
         losses['loss_bce'] = bce_loss
 
-
+        # return losses
         # constrain pts_feats to within 200x200x16 grid (self.COO_format_coords is the COO format of this) 
         pts_feat = self.pad_lidar_feats(pts_feat)
         # pts_feat is a sparse tensor

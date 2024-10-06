@@ -65,7 +65,7 @@ class NuScenesDatasetOccpancy(NuScenesDataset):
             num_classes=18,
             use_lidar_mask=False,
             use_image_mask=True)
-
+        show_dir = './vis/' if show_dir is None else show_dir
         print('\nStarting Evaluation...')
         for index, occ_pred in enumerate(tqdm(occ_results)):
             info = self.data_infos[index]
@@ -75,9 +75,10 @@ class NuScenesDatasetOccpancy(NuScenesDataset):
             mask_lidar = occ_gt['mask_lidar'].astype(bool)
             mask_camera = occ_gt['mask_camera'].astype(bool)
             # occ_pred = occ_pred
-            self.occ_eval_metrics.add_batch(occ_pred, gt_semantics, mask_lidar, mask_camera)
 
-            if index%100==0 and show_dir is not None:
+            self.occ_eval_metrics.add_batch(occ_pred, gt_semantics, mask_lidar, mask_camera)
+            
+            if index%1==0 and show_dir is not None:
                 gt_vis = self.vis_occ(gt_semantics)
                 pred_vis = self.vis_occ(occ_pred)
                 mmcv.imwrite(np.concatenate([gt_vis, pred_vis], axis=1),
