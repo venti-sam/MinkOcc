@@ -40,13 +40,13 @@ point_cloud_range = [-40.0, -40.0, -2.6, 40.0, 40.0, 5.4]
 
 numC_Trans = 32
 
-multi_adj_frame_id_cfg = (1, 1+1, 1)
+# multi_adj_frame_id_cfg = (1, 0, 1)
 
 model = dict(
     type='BEVStereo4DOCC',
     align_after_view_transfromation=False,
     dataset_type = 'waymo',
-    num_adj=len(range(*multi_adj_frame_id_cfg)),
+    num_adj=0,
     # add in lidar minkunet here 
     lidar_backbone = dict(
         type='TR3DMinkResNet',

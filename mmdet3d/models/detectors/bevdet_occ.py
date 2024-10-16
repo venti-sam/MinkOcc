@@ -44,8 +44,21 @@ class BEVStereo4DOCC(BEVStereo4D):
                  dataset_type='nuscenes',
                  
                  **kwargs):
+        if dataset_type == 'nuscenes':
+            kwargs['extra_ref_frames'] = 1  # Set for nuscenes
+            kwargs['stereo'] = True
+            self.num_classes = 18
+        elif dataset_type == 'waymo':
+            kwargs['extra_ref_frames'] = 0  # Set for waymo
+            kwargs['stereo'] = False
+            self.num_classes = 16
+        else:
+            raise ValueError(f"Unsupported dataset type: {dataset_type}")
+
+        # Call the parent constructor with updated kwargs
         super(BEVStereo4DOCC, self).__init__(**kwargs)
-        # 
+        
+    
         self.dataset_type = dataset_type    
         self.num_classes = 16 if dataset_type == 'waymo' else 18
 
@@ -489,7 +502,7 @@ class BEVStereo4DOCC(BEVStereo4D):
       
        
         img_feats, _, depth = self.extract_feat(
-            points, img=img_inputs, img_metas=img_metas, **kwargs)
+            points, img=img_inputs, img_metas=img_metas, dataset_type = self.dataset_type, **kwargs)
         
         # img feats in list[(b, c, z_voxel, x_voxel, y_voxel)] where z x and y are fixed at 16x200x200
         # c is given by cfg (prev frame + current_frame if prev_frame is used)

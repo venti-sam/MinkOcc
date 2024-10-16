@@ -286,7 +286,7 @@ class BEVDet4D(BEVDet):
     def __init__(self,
                  pre_process=None,
                  align_after_view_transfromation=False,
-                 num_adj=1,
+                 num_adj=0,
                  with_prev=True,
                  **kwargs):
         super(BEVDet4D, self).__init__(**kwargs)
@@ -426,7 +426,7 @@ class BEVDet4D(BEVDet):
             global2keyego @ ego2globals.double() @ sensor2egos.double()
         sensor2keyegos = sensor2keyegos.float()
 
-        curr2adjsensor = None
+        # curr2adjsensor = None
         if stereo:
             sensor2egos_cv, ego2globals_cv = sensor2egos, ego2globals
             sensor2egos_curr = \
@@ -445,6 +445,9 @@ class BEVDet4D(BEVDet):
             curr2adjsensor = [p.squeeze(1) for p in curr2adjsensor]
             curr2adjsensor.extend([None for _ in range(self.extra_ref_frames)])
             assert len(curr2adjsensor) == self.num_frame
+        else:
+            # When stereo is False, create a list of None values for each frame
+            curr2adjsensor = [None for _ in range(self.num_frame)]
 
         extra = [
             sensor2keyegos,
@@ -575,11 +578,12 @@ class BEVDepth4D(BEVDet4D):
 
 @DETECTORS.register_module()
 class BEVStereo4D(BEVDepth4D):
-    def __init__(self, **kwargs):
+    def __init__(self, extra_ref_frames = 1, stereo = True, **kwargs):
         super(BEVStereo4D, self).__init__(**kwargs)
-        self.extra_ref_frames = 1
+        self.extra_ref_frames = extra_ref_frames
         self.temporal_frame = self.num_frame
         self.num_frame += self.extra_ref_frames
+        self.stereo = stereo
 
     def extract_stereo_ref_feat(self, x):
         B, N, C, imH, imW = x.shape
@@ -644,7 +648,8 @@ class BEVStereo4D(BEVDepth4D):
             # Todo
             assert False
         imgs, sensor2keyegos, ego2globals, intrins, post_rots, post_trans, \
-        bda, curr2adjsensor = self.prepare_inputs(img, stereo=True)
+        bda, curr2adjsensor = self.prepare_inputs(img, stereo=self.stereo)
+
         """Extract features of images."""
         bev_feat_list = []
         depth_key_frame = None
