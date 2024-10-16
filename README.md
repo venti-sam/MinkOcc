@@ -70,8 +70,6 @@ python tools/train.py configs/bevdet_occ/bevdet_minkocc.py
 
 #### Test model
 
-# single gpu
-
 ```shell script
 python tools/test.py $config $checkpoint --eval mAP
 ```
