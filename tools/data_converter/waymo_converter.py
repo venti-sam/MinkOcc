@@ -2,7 +2,6 @@
 r"""Adapted from `Waymo to KITTI converter
     <https://github.com/caizhongang/waymo_kitti_converter>`_.
 """
-
 try:
     from waymo_open_dataset import dataset_pb2
 except ImportError:
@@ -20,6 +19,9 @@ from waymo_open_dataset.utils import range_image_utils, transform_utils
 from waymo_open_dataset.utils.frame_utils import \
     parse_range_image_and_camera_projection
 
+import os
+import tarfile
+import shutil
 
 class Waymo2KITTI(object):
     """Waymo to KITTI converter.
@@ -74,6 +76,7 @@ class Waymo2KITTI(object):
 
         self.load_dir = load_dir
         self.save_dir = save_dir
+        
         self.prefix = prefix
         self.workers = int(workers)
         self.test_mode = test_mode
@@ -88,6 +91,9 @@ class Waymo2KITTI(object):
         self.point_cloud_save_dir = f'{self.save_dir}/velodyne'
         self.pose_save_dir = f'{self.save_dir}/pose'
         self.timestamp_save_dir = f'{self.save_dir}/timestamp'
+        
+        # modified by samuel
+        self.occ_save_dir = f'{self.save_dir}/occ'
 
         self.create_folder()
 
@@ -115,12 +121,16 @@ class Waymo2KITTI(object):
                     and frame.context.stats.location
                     not in self.selected_waymo_locations):
                 continue
-
+            # modified by samuel
+            self.save_occ(self.load_dir, file_idx, frame_idx)
+            
             self.save_image(frame, file_idx, frame_idx)
             self.save_calib(frame, file_idx, frame_idx)
             self.save_lidar(frame, file_idx, frame_idx)
             self.save_pose(frame, file_idx, frame_idx)
             self.save_timestamp(frame, file_idx, frame_idx)
+            
+        
 
             if not self.test_mode:
                 self.save_label(frame, file_idx, frame_idx)
@@ -129,8 +139,51 @@ class Waymo2KITTI(object):
         """Length of the filename list."""
         return len(self.tfrecord_pathnames)
 
+
+    def save_occ(self, relative_save_dir, file_idx, frame_idx):
+        """Parse and save the occ data in npz format.
+
+        Args:
+            relative_save_dir: Relative directory to save the occ data. (./data/waymo/waymo_format/training)
+            file_idx (int): Current file index.
+            frame_idx (int): Current frame index.
+        """
+        # Extract the last part from the relative_save_dir ('training' or 'testing')
+        training = relative_save_dir.split('/')[-1]
+
+        # Form the path to the .tar file
+        tar_file_path = f'./data/waymo/waymo_format/gt_voxels/{training}/{str(file_idx).zfill(3)}.tar'
+
+        # Form the path to the .npz file within the tar archive
+        npz_file_name = f'{str(frame_idx).zfill(3)}_04.npz'
+
+        # Check if the tar file exists
+        if not os.path.exists(tar_file_path):
+            raise FileNotFoundError(f"Tar file not found: {tar_file_path}")
+
+        # Extract the tar file
+        with tarfile.open(tar_file_path, 'r') as tar:
+            tar.extractall(path='./temp_extracted')  # Extract to a temporary directory
+
+        # Form the full path to the extracted .npz file
+        npz_file_path = os.path.join(f'./temp_extracted/{str(file_idx).zfill(3)}', npz_file_name)
+
+        # Check if the .npz file exists after extraction
+        if not os.path.exists(npz_file_path):
+            raise FileNotFoundError(f"NPZ file not found: {npz_file_path}")
+
+        # The new filename format is: {prefix}{frame_idx}{file_idx}, padded to a consistent length
+        save_filename = f'{self.prefix}{str(file_idx).zfill(3)}{str(frame_idx).zfill(3)}.npz'
+        save_path = os.path.join(self.occ_save_dir, save_filename)
+
+        # Save (move) the occ data.npz to the destination directory with the new filename
+        shutil.move(npz_file_path, save_path)
+
+        # Clean up by removing the extracted directory if needed
+        # os.remove(npz_file_path)  # Optionally remove the extracted files
+
     def save_image(self, frame, file_idx, frame_idx):
-        """Parse and save the images in png format.
+        """Parse and save the images in jpg format.
 
         Args:
             frame (:obj:`Frame`): Open dataset frame proto.
@@ -140,7 +193,7 @@ class Waymo2KITTI(object):
         for img in frame.images:
             img_path = f'{self.image_save_dir}{str(img.name - 1)}/' + \
                 f'{self.prefix}{str(file_idx).zfill(3)}' + \
-                f'{str(frame_idx).zfill(3)}.png'
+                f'{str(frame_idx).zfill(3)}.jpg'
             img = mmcv.imfrombytes(img.image)
             mmcv.imwrite(img, img_path)
 
@@ -399,7 +452,7 @@ class Waymo2KITTI(object):
             dir_list1 = [
                 self.label_all_save_dir, self.calib_save_dir,
                 self.point_cloud_save_dir, self.pose_save_dir,
-                self.timestamp_save_dir
+                self.timestamp_save_dir, self.occ_save_dir
             ]
             dir_list2 = [self.label_save_dir, self.image_save_dir]
         else:

@@ -57,6 +57,7 @@ class WaymoDataset(KittiDataset):
     def __init__(self,
                  data_root,
                  ann_file,
+                 pose_file,
                  split,
                  pts_prefix='velodyne',
                  pipeline=None,
@@ -66,7 +67,7 @@ class WaymoDataset(KittiDataset):
                  filter_empty_gt=True,
                  test_mode=False,
                  load_interval=1,
-                 pcd_limit_range=[-85, -85, -5, 85, 85, 5],
+                 pcd_limit_range=[-40, -40, -2.6, 40, 40, 5.4],
                  **kwargs):
         super().__init__(
             data_root=data_root,
@@ -81,7 +82,10 @@ class WaymoDataset(KittiDataset):
             test_mode=test_mode,
             pcd_limit_range=pcd_limit_range,
             **kwargs)
-
+        # set number of cameras used
+        self.num_views = 5
+        # manually load cam_infos and cam_infos_val for transformation matrices
+        # self.cam_infos = mmcv.load(pose_file)
         # to load a subset, just set the load_interval in the dataset config
         self.data_infos = self.data_infos[::load_interval]
         if hasattr(self, 'flag'):
@@ -112,26 +116,107 @@ class WaymoDataset(KittiDataset):
         """
         info = self.data_infos[index]
         sample_idx = info['image']['image_idx']
+        # scene_idx = sample_idx % 1000000 // 1000
+        # frame_idx = sample_idx % 1000000 % 1000
         img_filename = os.path.join(self.data_root,
                                     info['image']['image_path'])
+        
+        # Load pose information (ego2global transformation)
+        # Assuming pose file path follows a pattern similar to calib files
+        pose_path = img_filename.replace('image_0', 'pose').replace('.jpg', '.txt')
+        with open(pose_path, 'r') as f:
+            lines = f.readlines()
+        pose_matrix = []
+        for line in lines:
+            pose_matrix.append([float(x) for x in line.strip().split()])
+        ego2global = np.array(pose_matrix, dtype=np.float32)
+            
+        # Add in support for multi-view camera in waymo based on cvt-occ code
+        # the Tr_velo_to_cam is computed for all images but not saved in .info for img1-4
+        # the size of img0-2: 1280x1920; img3-4: 886x1920
+        if self.modality['use_camera']:
+            image_paths = []
+            lidar2img_rts = []
+            intrinsics_rts = []
+            sensor2ego_rts = []
+            
+            
+            
+            # load calibration for all 5 images.
+            calib_path = img_filename.replace('image_0', 'calib').replace('.jpg', '.txt')
+            Tr_velo_to_cam_list = []
+            with open(calib_path, 'r') as f:
+                lines = f.readlines()
+            for line_num in range(6, 6 + self.num_views):
+                trans = np.array([float(info) for info in lines[line_num].split(' ')[1:13]]).reshape(3, 4)
+                trans = np.concatenate([trans, np.array([[0., 0., 0., 1.]])], axis=0).astype(np.float32)
+                Tr_velo_to_cam_list.append(trans)
+            assert np.allclose(Tr_velo_to_cam_list[0], info['calib']['Tr_velo_to_cam'].astype(np.float32))
 
-        # TODO: consider use torch.Tensor only
-        rect = info['calib']['R0_rect'].astype(np.float32)
-        Trv2c = info['calib']['Tr_velo_to_cam'].astype(np.float32)
-        P0 = info['calib']['P0'].astype(np.float32)
-        lidar2img = P0 @ rect @ Trv2c
+            for idx_img in range(self.num_views):
+                # pose = self.cam_infos[scene_idx][frame_idx][idx_img]
 
+                # intrinsics = pose['intrinsics'] # sensor2img
+                # sensor2ego = pose['sensor2ego']
+                # lidar2img = intrinsics @ np.linalg.inv(sensor2ego)
+                
+                # Attention! (this code means the pose info dismatch the image data file)
+                # if idx_img == 2: 
+                #     image_paths.append(img_filename.replace('image_0', f'image_3'))
+                # elif idx_img == 3: 
+                #     image_paths.append(img_filename.replace('image_0', f'image_2'))
+                # else:
+                #     image_paths.append(img_filename.replace('image_0', f'image_{idx_img}'))
+                    
+                rect = info['calib']['R0_rect'].astype(np.float32)
+                Trv2c = info['calib']['Tr_velo_to_cam'].astype(np.float32)
+                Trv2c = Tr_velo_to_cam_list[idx_img]
+                P0 = info['calib'][f'P{idx_img}'].astype(np.float32)
+                lidar2img = P0 @ rect @ Trv2c
+                sensor2ego = np.linalg.inv(lidar2img) @ P0
+                image_paths.append(img_filename.replace('image_0', f'image_{idx_img}'))
+                lidar2img_rts.append(lidar2img)
+                sensor2ego_rts.append(sensor2ego)
+                
+                # intrinsics_rts.append(intrinsics)   
+                # sensor2ego_rts.append(sensor2ego)
+                
+                # Extract the intrinsic matrix from P0 and append to intrinsics_rts
+                intrinsic = P0[:3, :3]
+                intrinsics_rts.append(intrinsic)
+                # print(intrinsic)
+                
+                
+                # intrinsics_rts.append(intrinsic)
+            
+        
         pts_filename = self._get_pts_filename(sample_idx)
         input_dict = dict(
             sample_idx=sample_idx,
             pts_filename=pts_filename,
-            img_prefix=None,
-            img_info=dict(filename=img_filename),
-            lidar2img=lidar2img)
+            img_prefix=None
+        )
+            # img_info=dict(filename=img_filename),
+            # lidar2img=lidar2img)
+        if self.modality['use_camera']:
+            input_dict['img_filename'] = image_paths
+            input_dict['lidar2img'] = lidar2img_rts
+            input_dict['cam_intrinsic'] = intrinsics_rts
+            input_dict['sensor2ego'] = sensor2ego_rts   
+            # ego2global = self.cam_infos[scene_idx][frame_idx][0]['ego2global']
+            input_dict['ego2global'] = ego2global
+            input_dict['global_to_curr_lidar_rt'] = np.linalg.inv(ego2global)
 
+            
         if not self.test_mode:
             annos = self.get_ann_info(index)
-            input_dict['ann_info'] = annos
+            # input_dict['ann_infos'] = anno
+            # input_dict['gt_bboxes_3d'] = annos['gt_bboxes_3d']  
+            # input_dict['gt_labels_3d'] = annos['gt_labels_3d']
+            input_dict['gt_bboxes'] = annos['bboxes']
+            input_dict['gt_labels'] = annos['labels']
+            # input_dict['gt_names'] = annos['gt_names']
+            
 
         return input_dict
 

@@ -9,6 +9,7 @@ from .lyft_dataset import LyftDataset
 from .nuscenes_dataset import NuScenesDataset
 from .nuscenes_mono_dataset import NuScenesMonoDataset
 from .nuscenes_dataset_occ import NuScenesDatasetOccpancy
+from .waymo_dataset_occ import WaymoDatasetOccupancy
 # yapf: disable
 from .pipelines import (AffineResize, BackgroundPointsFilter, GlobalAlignment,
                         GlobalRotScaleTrans, IndoorPatchPointSample,
@@ -45,5 +46,5 @@ __all__ = [
     'RandomJitterPoints', 'ObjectNameFilter', 'AffineResize',
     'RandomShiftScale', 'LoadPointsFromDict', 'PIPELINES',
     'RangeLimitedRandomCrop', 'RandomRotate', 'MultiViewWrapper',
-    'NuScenesDatasetOccpancy'
+    'NuScenesDatasetOccpancy', 'WaymoDatasetOccupancy'
 ]

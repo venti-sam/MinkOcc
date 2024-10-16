@@ -1,22 +1,16 @@
 # Copyright (c) Phigent Robotics. All rights reserved.
 
-_base_ = ['../_base_/datasets/nus-3d.py', '../_base_/default_runtime.py']
+_base_ = ['../_base_/default_runtime.py']
 # Global
-# For nuScenes we usually do 10-class detection
-class_names = [
-    'car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier',
-    'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
-]
-
+# # For nuScenes we usually do 10-class detection
+# class_names = [
+#     'car', 'truck', 'construction_vehicle', 'bus', 'trailer', 'barrier',
+#     'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone'
+# ]
+class_names = ['Car', 'Pedestrian', 'Cyclist']
 data_config = {
-    'cams': [
-        'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
-        'CAM_BACK', 'CAM_BACK_RIGHT'
-    ],
-    'Ncams':
-    6,
     'input_size': (256, 704),
-    'src_size': (900, 1600),
+    'src_size': (1280, 1920),
 
     # Augmentation
     'resize': (-0.06, 0.11),
@@ -25,6 +19,12 @@ data_config = {
     'crop_h': (0.0, 0.0),
     'resize_test': 0.00,
 }
+# GT occuapncy configs
+use_infov_mask = True
+use_lidar_mask = False
+use_camera_mask = True
+FREE_LABEL = 23
+num_classes = 16
 
 # Model
 grid_config = {
@@ -45,12 +45,12 @@ multi_adj_frame_id_cfg = (1, 1+1, 1)
 model = dict(
     type='BEVStereo4DOCC',
     align_after_view_transfromation=False,
-    dataset_type = 'nuscenes',
+    dataset_type = 'waymo',
     num_adj=len(range(*multi_adj_frame_id_cfg)),
     # add in lidar minkunet here 
     lidar_backbone = dict(
         type='TR3DMinkResNet',
-        in_channels=5,
+        in_channels=6,
         depth=18,
         pool = False,
         num_stages = 4,
@@ -75,7 +75,7 @@ model = dict(
         voxel_size=[0.4, 0.4, 0.4],  # xy size follow centerpoint
         # max_voxels=(90000, 120000)),
     ),
-    pts_voxel_encoder=dict(type='HardSimpleVFE', num_features=5),
+    pts_voxel_encoder=dict(type='HardSimpleVFE', num_features=6),
 
     
     # add in sparse fusion (modelled from openoccupancy adaptive fusion)
@@ -175,8 +175,8 @@ model = dict(
 )
 
 # Data
-dataset_type = 'NuScenesDatasetOccpancy'
-data_root = 'data/nuscenes/'
+dataset_type = 'WaymoDatasetOccupancy'
+data_root = 'data/waymo/kitti_format/'
 file_client_args = dict(backend='disk')
 
 bda_aug_conf = dict(
@@ -186,46 +186,68 @@ bda_aug_conf = dict(
     flip_dy_ratio=0.5)
 
 train_pipeline = [
+    dict(type='WaymoLoadMultiViewImageFromFiles', 
+         data_config=data_config,
+         to_float32=True, 
+         img_scale=(1280, 1920),
+         is_train = True,
+         scales = [0.1],
+    ),
     dict(
-        type='PrepareImageInputs',
-        is_train=True,
-        data_config=data_config,
-        sequential=True),
-    dict(type='LoadOccGTFromFile'),
-    dict(type='LoadAnnotations'),
+        type='WaymoLoadOccGTFromFile',
+        crop_x=False,
+        use_infov_mask=use_infov_mask,
+        use_camera_mask=use_camera_mask,
+        use_lidar_mask=use_lidar_mask,
+        FREE_LABEL=FREE_LABEL,
+        num_classes=num_classes,
+    ),
+    dict(type='WaymoLoadAnnotations'),
     dict(
         type='LoadPointsFromFile',
         coord_type='LIDAR',
-        load_dim=5,
-        use_dim=5,
+        load_dim=6,
+        use_dim=6,
         file_client_args=file_client_args),
     dict(
-        type='BEVAug',
+        type='WaymoBEVAug',
         bda_aug_conf=bda_aug_conf,
-        is_train = True,
         classes=class_names),
-    dict(type='PointToMultiViewDepthFusion', downsample=1, grid_config=grid_config),
-
+    dict(type='WaymoPointToMultiViewDepthFusion', downsample=1, grid_config=grid_config),
     dict(type='DefaultFormatBundle3D', class_names=class_names),
     dict(
-        type='Collect3D', keys=['img_inputs', 'points', 'gt_depth', 'voxel_semantics',
+        type='Collect3D', keys=['img_inputs', 'points', 'gt_depth', 'voxel_semantics', 'mask_infov',
                                 'mask_lidar','mask_camera'])
 ]
 
 test_pipeline = [
-    dict(type='PrepareImageInputs', data_config=data_config, sequential=True),
-    dict(type='LoadAnnotations'),
-    dict(type='BEVAug',
-         bda_aug_conf=bda_aug_conf,
-         classes=class_names,
-         is_train=False),
-    dict(type = 'LoadOccGTFromFile'),
+     dict(type='WaymoLoadMultiViewImageFromFiles', 
+         data_config=data_config,
+         to_float32=True, 
+         img_scale=(1280, 1920),
+         is_train = False,
+         scales = [0.1],
+    ),
+    dict(type='WaymoLoadAnnotations'),
     dict(
         type='LoadPointsFromFile',
         coord_type='LIDAR',
-        load_dim=5,
-        use_dim=5,
+        load_dim=6,
+        use_dim=6,
         file_client_args=file_client_args),
+    dict(type='WaymoBEVAug',
+         bda_aug_conf=bda_aug_conf,
+         classes=class_names,
+         is_train=False),
+    dict(
+        type='WaymoLoadOccGTFromFile',
+        crop_x=False,
+        use_infov_mask=use_infov_mask,
+        use_camera_mask=use_camera_mask,
+        use_lidar_mask=use_lidar_mask,
+        FREE_LABEL=FREE_LABEL,
+        num_classes=num_classes,
+    ),
     dict(
         type='MultiScaleFlipAug3D',
         img_scale=(1333, 800),
@@ -247,38 +269,66 @@ input_modality = dict(
     use_map=False,
     use_external=False)
 
-share_data_config = dict(
-    type=dataset_type,
-    classes=class_names,
-    modality=input_modality,
-    stereo=True,
-    filter_empty_gt=False,
-    img_info_prototype='bevdet4d',
-    multi_adj_frame_id_cfg=multi_adj_frame_id_cfg,
-)
+# share_data_config = dict(
+#     type=dataset_type,
+#     classes=class_names,
+#     modality=input_modality,
+#     stereo=True,
+#     filter_empty_gt=False,
+#     img_info_prototype='bevdet4d',
+#     multi_adj_frame_id_cfg=multi_adj_frame_id_cfg,
+# )
 
-test_data_config = dict(
-    pipeline=test_pipeline,
-    ann_file=data_root + 'bevdetv3-nuscenes_infos_val.pkl')
+# test_data_config = dict(
+#     pipeline=test_pipeline,
+#     ann_file=data_root + 'bevdetv3-nuscenes_infos_val.pkl')
 
 data = dict(
     samples_per_gpu=1, # batch size
     workers_per_gpu=4,
     train=dict(
-        data_root=data_root,
-        ann_file=data_root + 'bevdetv3-nuscenes_infos_train.pkl',
-        pipeline=train_pipeline,
-        classes=class_names,
-        test_mode=False,
-        use_valid_flag=True,
-        # we use box_type_3d='LiDAR' in kitti and nuscenes dataset
-        # and box_type_3d='Depth' in sunrgbd and scannet dataset.
-        box_type_3d='LiDAR'),
-    val=test_data_config,
-    test=test_data_config)
+        type = dataset_type,
+        data_root = data_root,
+        ann_file = data_root + 'waymo_infos_train.pkl', 
+        pose_file = data_root + 'cam_infos.pkl',
+        split = 'training',
+        pipeline = train_pipeline,
+        modality = input_modality,
+        classes = class_names,
+        test_mode = False,
+        box_type_3d = 'LiDAR',
+        load_interval = 1,
+        filter_empty_gt = False,
+    ),
+    val = dict(
+        type = dataset_type,
+        data_root = data_root,
+        ann_file = data_root + 'waymo_infos_val.pkl',
+        pose_file = data_root + 'cam_infos_val.pkl',
+        split = 'training',
+        pipeline = test_pipeline,
+        modality = input_modality,
+        classes = class_names,
+        test_mode = True,
+        box_type_3d = 'LiDAR',
+        filter_empty_gt = False,
+    ),
+    test = dict(
+        type = dataset_type,
+        data_root = data_root,
+        ann_file = data_root + 'waymo_infos_val.pkl',
+        pose_file = data_root + 'cam_infos_val.pkl',
+        split = 'training',
+        pipeline = test_pipeline,
+        modality = input_modality,
+        classes = class_names,
+        test_mode = True,
+        box_type_3d = 'LiDAR',
+        filter_empty_gt = False,
+    ))
+        
+       
 
-for key in ['val', 'train', 'test']:
-    data[key].update(share_data_config)
 
 # Optimizer
 optimizer = dict(type='AdamW', lr=1e-4, weight_decay=1e-2)

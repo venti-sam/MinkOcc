@@ -27,7 +27,7 @@ class BEVStereo4DOCC(BEVStereo4D):
                  loss_occ=None,
                  out_dim=32,
                  use_mask=False,
-                 num_classes=18,
+                #  num_classes=18,
                  use_predicter=True,
                  class_wise=False,
                  ## add in lidar backbone here
@@ -40,9 +40,15 @@ class BEVStereo4DOCC(BEVStereo4D):
                  occ_backbone=None,
                  # add in multi-modal neck here
                  occ_neck=None,
+                 # distinguish between nuscenes and waymo / kitti
+                 dataset_type='nuscenes',
                  
                  **kwargs):
         super(BEVStereo4DOCC, self).__init__(**kwargs)
+        # 
+        self.dataset_type = dataset_type    
+        self.num_classes = 16 if dataset_type == 'waymo' else 18
+
         # add in lidar backbone and necessary inits here
         self.lidar_backbone = builder.build_backbone(lidar_backbone)
         self.lidar_neck = builder.build_neck(lidar_neck)
@@ -82,12 +88,11 @@ class BEVStereo4DOCC(BEVStereo4D):
             self.predicter = nn.Sequential(
                 ME.MinkowskiLinear(self.out_dim, self.out_dim*2),
                 MinkowskiSoftplus(),
-                ME.MinkowskiLinear(self.out_dim*2, num_classes),
+                ME.MinkowskiLinear(self.out_dim*2, self.num_classes),
             )
             
         self.pts_bbox_head = None
         self.use_mask = use_mask
-        self.num_classes = num_classes
         self.loss_occ = build_loss(loss_occ)
         self.class_wise = class_wise
         self.align_after_view_transfromation = False
@@ -335,10 +340,13 @@ class BEVStereo4DOCC(BEVStereo4D):
         # process the occupancy grid
         voxel_semantics = kwargs['voxel_semantics']
         mask_camera = kwargs['mask_camera']
-        assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+        if self.dataset_type == 'nuscenes':
+            assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 17
+        if self.dataset_type == 'waymo':
+            assert voxel_semantics.min() >= 0 and voxel_semantics.max() <= 15
+        # print(voxel_semantics.min(), voxel_semantics.max())
         # print(voxel_semantics.shape) # [batch, 200, 200, 16]
-
-        # Clone voxel_semantics and apply mask for camera, set class 18 where mask_camera == 0
+        
         masked_semantics = voxel_semantics.clone().to(torch.int8)
         masked_semantics[mask_camera == 0] = -100  # Set class to -100 where mask_camera == 0
 
@@ -356,9 +364,15 @@ class BEVStereo4DOCC(BEVStereo4D):
             # Process voxel semantics for the current batch
             current_voxel_grid = voxel_semantics[b]
             
-            # Mask to remove class 17 and get valid coordinates
-            mask = current_voxel_grid != 17
-            coords = torch.argwhere(mask)  # (n, 3), get coordinates where class is not 17
+            # Mask to remove class 17 and get valid coordinates (nuscenes)
+            # Mask to remove class 15 and get valid coordinates (waymo)
+            if self.dataset_type == 'nuscenes':
+                mask = current_voxel_grid != 17
+            if self.dataset_type == 'waymo':
+                mask = current_voxel_grid != 15
+
+            
+            coords = torch.argwhere(mask)  # (n, 3), get coordinates where class is not 17/15
             
             # Store valid coordinates in coo_list_gt
             coo_list_gt.append(coords)
@@ -386,13 +400,53 @@ class BEVStereo4DOCC(BEVStereo4D):
 
         # voxelization of pointcloud
         voxels, num_points, coors = self.voxelize(points)
-        coors[:, 2] = 200 - coors[:, 2]  # Reverse the x direction
-        # move b,z,x,y,to b, x, y,z
-        coors = coors[:, [0, 2, 3, 1]]
+        if self.dataset_type == 'nuscenes':
+            coors[:, 3] = 200 - coors[:, 3]  # Reverse the y direction
+            # move b,z,x,y,to b, x, y,z
+            coors = coors[:, [0, 2, 3, 1]]
+        if self.dataset_type == 'waymo':
+            # move b, z, y, x to b, x, y, z
+            coors = coors[:, [0, 3, 2, 1]]
         # in coors, get the highest coord in column 2 and 3
         # coors shape is (b, z, x, y) -> includes all batches of points
         # Find the maximum value in the 2nd column (x-coordinate)
         # try plotting the first batch coors to see what it looks like
+
+        # input_coords = coo_list_gt[0].cpu().numpy()
+ 
+        # from plyfile import PlyData, PlyElement
+    
+        # # Prepare the data for PLY file (only coordinates)
+        # vertex_data = [(x, y, z) for x, y, z in input_coords]
+
+        # # Define the PLY elements (only x, y, z coordinates)
+        # vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4')]
+
+        # # Create the PLY structure
+        # ply_elements = PlyElement.describe(np.array(vertex_data, dtype=vertex_dtype), 'vertex')
+
+        # # # Save to a PLY file
+        # ply_data = PlyData([ply_elements], text=True)
+        # ply_data.write('pts_gt.ply')
+        
+        # input_coords = coors.cpu().numpy()
+        
+        # # from plyfile import PlyData, PlyElement
+    
+        # # Prepare the data for PLY file (only coordinates)
+        # vertex_data = [(x, y, z) for x, y, z in input_coords[:, 1:]]
+
+        # # Define the PLY elements (only x, y, z coordinates)
+        # vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4')]
+
+        # # Create the PLY structure
+        # ply_elements = PlyElement.describe(np.array(vertex_data, dtype=vertex_dtype), 'vertex')
+
+        # # Save to a PLY file
+        # ply_data = PlyData([ply_elements], text=True)
+        # ply_data.write('pts_coors.ply')
+        # ppp
+
 
         # voxels shape is (num_voxels, max_points, 5) -> includes all batches of points
         # num_points is the number of points across batches
@@ -422,6 +476,7 @@ class BEVStereo4DOCC(BEVStereo4D):
         #  BCE Loss calculation for scene completion point existence
         bce_loss = self.lidar_neck.get_bce_loss(out_cls, targets)
         losses['loss_bce'] = bce_loss
+        
 
         # return losses
         # constrain pts_feats to within 200x200x16 grid (self.COO_format_coords is the COO format of this) 
@@ -431,25 +486,7 @@ class BEVStereo4DOCC(BEVStereo4D):
         # pts_feat_coords, pts_feat_feats = pts_feat.decomposed_coordinates_and_features
         
         
-        # input_coords = pts_feat_coords[0].cpu().numpy()
-        
-        # from plyfile import PlyData, PlyElement
-    
-        # # Prepare the data for PLY file (only coordinates)
-        # vertex_data = [(x, y, z) for x, y, z in input_coords]
-
-        # # Define the PLY elements (only x, y, z coordinates)
-        # vertex_dtype = [('x', 'f4'), ('y', 'f4'), ('z', 'f4')]
-
-        # # Create the PLY structure
-        # ply_elements = PlyElement.describe(np.array(vertex_data, dtype=vertex_dtype), 'vertex')
-
-        # # Save to a PLY file
-        # ply_data = PlyData([ply_elements], text=True)
-        # ply_data.write('pts_image.ply')
-        
-        
-        # ppp
+      
        
         img_feats, _, depth = self.extract_feat(
             points, img=img_inputs, img_metas=img_metas, **kwargs)

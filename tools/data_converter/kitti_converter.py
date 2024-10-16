@@ -250,7 +250,7 @@ def create_waymo_info_file(data_path,
     imageset_folder = Path(data_path) / 'ImageSets'
     train_img_ids = _read_imageset_file(str(imageset_folder / 'train.txt'))
     val_img_ids = _read_imageset_file(str(imageset_folder / 'val.txt'))
-    test_img_ids = _read_imageset_file(str(imageset_folder / 'test.txt'))
+    # test_img_ids = _read_imageset_file(str(imageset_folder / 'test.txt'))
 
     print('Generate info. this may take several minutes.')
     if save_path is None:
@@ -266,16 +266,16 @@ def create_waymo_info_file(data_path,
         relative_path=relative_path,
         max_sweeps=max_sweeps,
         num_worker=workers)
-    waymo_infos_gatherer_test = WaymoInfoGatherer(
-        data_path,
-        training=False,
-        label_info=False,
-        velodyne=True,
-        calib=True,
-        pose=True,
-        relative_path=relative_path,
-        max_sweeps=max_sweeps,
-        num_worker=workers)
+    # waymo_infos_gatherer_test = WaymoInfoGatherer(
+    #     data_path,
+    #     training=False,
+    #     label_info=False,
+    #     velodyne=True,
+    #     calib=True,
+    #     pose=True,
+    #     relative_path=relative_path,
+    #     max_sweeps=max_sweeps,
+    #     num_worker=workers)
     num_points_in_gt_calculater = _NumPointsInGTCalculater(
         data_path,
         relative_path,
@@ -296,10 +296,10 @@ def create_waymo_info_file(data_path,
     filename = save_path / f'{pkl_prefix}_infos_trainval.pkl'
     print(f'Waymo info trainval file is saved to {filename}')
     mmcv.dump(waymo_infos_train + waymo_infos_val, filename)
-    waymo_infos_test = waymo_infos_gatherer_test.gather(test_img_ids)
-    filename = save_path / f'{pkl_prefix}_infos_test.pkl'
-    print(f'Waymo info test file is saved to {filename}')
-    mmcv.dump(waymo_infos_test, filename)
+    # waymo_infos_test = waymo_infos_gatherer_test.gather(test_img_ids)
+    # filename = save_path / f'{pkl_prefix}_infos_test.pkl'
+    # print(f'Waymo info test file is saved to {filename}')
+    # mmcv.dump(waymo_infos_test, filename)
 
 
 def _create_reduced_point_cloud(data_path,

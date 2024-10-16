@@ -223,7 +223,10 @@ def main():
     model.init_weights()
 
     logger.info(f'Model:\n{model}')
+    
     datasets = [build_dataset(cfg.data.train)]
+    
+
     if len(cfg.workflow) == 2:
         val_dataset = copy.deepcopy(cfg.data.val)
         # in case we use a dataset wrapper
@@ -261,6 +264,7 @@ def main():
                  keys=['points', 'gt_bboxes_3d', 'gt_depth',
                 'gt_labels_3d', 'img_inputs']))
         datasets.append(build_dataset(cfg.data.train))
+
     # add an attribute for visualization convenience
     model.CLASSES = datasets[0].CLASSES
     train_model(

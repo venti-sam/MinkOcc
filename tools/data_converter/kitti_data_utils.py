@@ -20,7 +20,7 @@ def get_image_index_str(img_idx, use_prefix_id=False):
 def get_kitti_info_path(idx,
                         prefix,
                         info_type='image_2',
-                        file_tail='.png',
+                        file_tail='.jpg',
                         training=True,
                         relative_path=True,
                         exist_check=True,
@@ -47,8 +47,18 @@ def get_image_path(idx,
                    exist_check=True,
                    info_type='image_2',
                    use_prefix_id=False):
-    return get_kitti_info_path(idx, prefix, info_type, '.png', training,
+    return get_kitti_info_path(idx, prefix, info_type, '.jpg', training,
                                relative_path, exist_check, use_prefix_id)
+
+def get_occ_path(idx,
+                prefix,
+                training=True,
+                relative_path=True,
+                exist_check=True,
+                info_type='occ',
+                use_prefix_id=False):
+    return get_kitti_info_path(idx, prefix, info_type, '.npz', training,
+                                 relative_path, exist_check, use_prefix_id)
 
 
 def get_label_path(idx,
@@ -322,6 +332,7 @@ class WaymoInfoGatherer:
             [optional]difficulty: kitti difficulty
             [optional]group_ids: used for multi-part object
         }
+        occ: .npz file
     }
     """
 
@@ -355,6 +366,18 @@ class WaymoInfoGatherer:
         pc_info = {'num_features': 6}
         calib_info = {}
 
+
+        # modified by samuel
+        occ_path = get_occ_path(
+            idx,
+            self.path,
+            self.training,
+            self.relative_path,
+            info_type='occ',
+            use_prefix_id=True)
+        info['occ_gt_path'] = occ_path  # .npz file
+        
+        
         image_info = {'image_idx': idx}
         annotations = None
         if self.velodyne:
