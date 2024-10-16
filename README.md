@@ -63,15 +63,18 @@ g. For Occupancy Prediction task, download the mini and (only) the 'gts' from [C
 
 #### Train model
 
-````shell
+```shell script
 # single gpu
 python tools/train.py configs/bevdet_occ/bevdet_minkocc.py
+```
 
 #### Test model
 
-```shell
 # single gpu
+
+```shell script
 python tools/test.py $config $checkpoint --eval mAP
+```
 
 ## Acknowledgement
 
@@ -126,3 +129,4 @@ year={2021}
 ```
 
 ```
+````
