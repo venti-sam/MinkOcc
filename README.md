@@ -4,26 +4,26 @@
 
 #### Installation and Data Preparation
 
-# a. Create a conda virtual environment and activate it.
+a. Create a conda virtual environment and activate it.
 
 conda create -n open-mmlab python=3.8 -y
 conda activate open-mmlab
 
-# b. Install PyTorch and torchvision following the official instructions.
+b. Install PyTorch and torchvision following the official instructions.
 
 pip install torch==1.12.0+cu113 torchvision==0.13.0+cu114 -f https://download.pytorch.org/whl/torch_stable.html
 Recommended torch>=1.12
 
-# c. Install mmcv-full.
+c. Install mmcv-full.
 
 pip install mmcv-full==1.5.2
 
-# d. Install mmdet and mmseg.
+d. Install mmdet and mmseg.
 
 pip install mmdet==2.24.0
 pip install mmsegmentation==0.24.0
 
-# e. Prepare MinkOcc repo by.
+e. Prepare MinkOcc repo by.
 
 ```shell script
 git clone https://github.com/venti-sam/MinkOcc.git
@@ -31,7 +31,7 @@ cd MinkOcc
 pip install -v -e .
 ```
 
-# f. Download Nuscenes Mini dataset:
+f. Download Nuscenes Mini dataset:
 
 https://www.nuscenes.org/nuscenes#download
 
@@ -41,7 +41,7 @@ step 3. Prepare nuScenes dataset as introduced in [nuscenes_det.md](docs/en/data
 python tools/create_data_bevdet.py
 ```
 
-# g. For Occupancy Prediction task, download the mini and (only) the 'gts' from [CVPR2023-3D-Occupancy-Prediction](https://github.com/CVPR2023-3D-Occupancy-Prediction/CVPR2023-3D-Occupancy-Prediction) and arrange the folder as:
+g. For Occupancy Prediction task, download the mini and (only) the 'gts' from [CVPR2023-3D-Occupancy-Prediction](https://github.com/CVPR2023-3D-Occupancy-Prediction/CVPR2023-3D-Occupancy-Prediction) and arrange the folder as:
 
 ```shell script
 └── nuscenes
