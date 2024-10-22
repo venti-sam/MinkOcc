@@ -498,12 +498,14 @@ class GTDatabaseCreater:
                         load_dim=6,
                         use_dim=6,
                         file_client_args=file_client_args),
-                    dict(
-                        type='LoadAnnotations3D',
-                        with_bbox_3d=True,
-                        with_label_3d=True,
-                        file_client_args=file_client_args)
+                    # dict(
+                    #     type='LoadAnnotations3D',
+                    #     with_bbox_3d=True,
+                    #     with_label_3d=True,
+                    #     file_client_args=file_client_args)
+                    dict(type='WaymoLoadAnnotations'),
                 ])
+
 
         dataset = build_dataset(dataset_cfg)
         self.pipeline = dataset.pipeline

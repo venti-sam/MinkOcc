@@ -171,7 +171,7 @@ def waymo_data_prep(root_path,
     from tools.data_converter import waymo_converter as waymo
 
     splits = ['training', 'validation', 'testing']
-    splits = ['training', 'validation']
+    # splits = ['training', 'validation']
     for i, split in enumerate(splits):
         load_dir = osp.join(root_path, 'waymo_format', split)
         if split == 'validation':
@@ -190,14 +190,14 @@ def waymo_data_prep(root_path,
     kitti.create_waymo_info_file(
         out_dir, info_prefix, max_sweeps=max_sweeps, workers=workers)
     
-    GTDatabaseCreater(
-        'WaymoDataset',
-        out_dir,
-        info_prefix,
-        f'{out_dir}/{info_prefix}_infos_train.pkl',
-        relative_path=False,
-        with_mask=False,
-        num_worker=workers).create()
+    # GTDatabaseCreater(
+    #     'WaymoDataset',
+    #     out_dir,
+    #     info_prefix,
+    #     f'{out_dir}/{info_prefix}_infos_train.pkl',
+    #     relative_path=False,
+    #     with_mask=False,
+    #     num_worker=workers).create()
 
 
 parser = argparse.ArgumentParser(description='Data converter arg parser')

@@ -57,7 +57,6 @@ class WaymoDataset(KittiDataset):
     def __init__(self,
                  data_root,
                  ann_file,
-                 pose_file,
                  split,
                  pts_prefix='velodyne',
                  pipeline=None,
