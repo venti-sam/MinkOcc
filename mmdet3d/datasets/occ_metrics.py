@@ -94,7 +94,6 @@ class Metric_mIoU():
         k = (gt >= 0) & (gt < n_cl)  # exclude 255
         labeled = np.sum(k)
         correct = np.sum((pred[k] == gt[k]))
-
         return (
             np.bincount(
                 n_cl * gt[k].astype(int) + pred[k].astype(int), minlength=n_cl ** 2

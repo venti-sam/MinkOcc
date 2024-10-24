@@ -130,7 +130,7 @@ model = dict(
     # add in lidar minkunet here 
     occ_backbone = dict(
         type='TR3DMinkResNet',
-        in_channels=16,
+        in_channels=64,
         depth=18,
         pool = False,
         num_stages = 4,
@@ -171,12 +171,12 @@ model = dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,
         loss_weight=1.0),
-    use_mask=True,
+    use_mask=False,
 )
 
 # Data
 dataset_type = 'NuScenesDatasetOccpancy'
-data_root = 'data/nuscenes/'
+data_root = 'data/nuscenes_mini/'
 file_client_args = dict(backend='disk')
 
 bda_aug_conf = dict(
@@ -288,7 +288,7 @@ lr_config = dict(
     warmup='linear',
     warmup_iters=200,
     warmup_ratio=0.001,
-    step=[100,])
+    step=[50,])
 runner = dict(type='EpochBasedRunner', max_epochs=100)
 
 custom_hooks = [

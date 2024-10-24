@@ -75,7 +75,6 @@ class NuScenesDatasetOccpancy(NuScenesDataset):
             mask_lidar = occ_gt['mask_lidar'].astype(bool)
             mask_camera = occ_gt['mask_camera'].astype(bool)
             # occ_pred = occ_pred
-
             self.occ_eval_metrics.add_batch(occ_pred, gt_semantics, mask_lidar, mask_camera)
             
             if index%1==0 and show_dir is not None:
