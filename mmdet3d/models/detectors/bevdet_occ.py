@@ -696,6 +696,14 @@ class BEVStereo4DOCC(BEVStereo4D):
         self.loss_occ = build_loss(loss_occ)
         self.class_wise = class_wise
         self.align_after_view_transfromation = False
+        
+        z_voxel, x_voxel, y_voxel = 16, 200, 200
+        # Generate the voxel coordinates once (since they are the same for all batches)
+        z_coords, x_coords, y_coords = torch.meshgrid(
+            torch.arange(z_voxel), torch.arange(x_voxel), torch.arange(y_voxel), indexing='ij'
+        )
+        self.COO_format_coords = torch.stack([x_coords, y_coords, z_coords], dim=-1).reshape(-1, 3)  # shape (num_voxels, 3)
+        
 
     def loss_single(self,voxel_semantics,mask_camera,preds):
         loss_ = dict()
@@ -776,7 +784,33 @@ class BEVStereo4DOCC(BEVStereo4D):
         loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
         losses['loss_depth'] = loss_depth
 
-        # print("img_feats shape:", img_feats.shape)
+        # img feats in list[(b, c, z_voxel, y_voxel, x_voxel)] where z x and y are fixed at 16x200x200
+        # c is given by cfg (prev frame + current_frame if prev_frame is used)
+        # depth in (b * ncams, depth_bins, x_resized, y_resized) 
+        # convert img feats to sparse tensor format to be fused with pts_feat
+        # pts feat COO (n, 3) coords and (n, 32) feats 
+        channels = img_feats.shape[1]    # number of channels
+        batch_size = img_feats.shape[0]
+
+        coo_list = [self.COO_format_coords for _ in range(batch_size)]  # Create a list where each entry is the same `coords` tensor
+        feats_list = []
+        for b in range(batch_size):
+            current_voxel_grid = img_feats[b].permute(0, 3, 2, 1)  # shape (c, z_voxel, y_voxel, x_voxel) -> (c, x, y, z)
+            # flatten
+            feats = current_voxel_grid.view(channels, -1).transpose(0, 1)
+            feats_list.append(feats)
+        stacked_feats = torch.vstack(feats_list)  # shape (num_voxels * batch size, c)
+        img_sparse_tensor = ME.SparseTensor(
+            features=stacked_feats,
+            device = img_feats.device,
+            coordinates = ME.utils.batched_coordinates(coo_list),
+        )
+        
+        
+        
+        print("img_feats shape:", img_sparse_tensor.shape)
+        pppp
+        
         occ_pred = self.final_conv(img_feats).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc (bczyx -> bxyzc)
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)

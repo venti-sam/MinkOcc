@@ -129,45 +129,45 @@ model = dict(
     ######################################################
     # Multo- modal semantic segmentation
     # add in lidar minkunet here 
-    # occ_backbone = dict(
-    #     type='TR3DMinkResNet',
-    #     in_channels=64,
-    #     depth=18,
-    #     pool = False,
-    #     num_stages = 4,
-    #     in_planes = 32, 
-    #     norm='batch',
-    #     num_planes=(64, 128, 256, 512)
-    # ),
+    occ_backbone = dict(
+        type='TR3DMinkResNet',
+        in_channels=64,
+        depth=18,
+        pool = False,
+        num_stages = 4,
+        in_planes = 32, 
+        norm='batch',
+        num_planes=(64, 128, 256, 512)
+    ),
     # # add in lidar minkunet neck here 
-    # occ_neck = dict(
-    #     type='TR3DNeck',
-    #     in_channels=(64, 128, 256, 512),
-    #     out_channels=32,
-    #     strides=(4, 8, 16, 32),  # Strides from the backbone
-    #     # loss_bce_weight = 1.0,
-    #     is_generative=False
-    # ),
+    occ_neck = dict(
+        type='TR3DNeck',
+        in_channels=(64, 128, 256, 512),
+        out_channels=32,
+        strides=(4, 8, 16, 32),  # Strides from the backbone
+        # loss_bce_weight = 1.0,
+        is_generative=False
+    ),
     
-    img_bev_encoder_backbone=dict(
-        type='CustomResNet3D',
-        numC_input=numC_Trans * (len(range(*multi_adj_frame_id_cfg))+1),
-        num_layer=[1, 2, 4],
-        with_cp=False,
-        num_channels=[numC_Trans,numC_Trans*2,numC_Trans*4],
-        stride=[1,2,2],
-        backbone_output_ids=[0,1,2]),
-    img_bev_encoder_neck=dict(type='LSSFPN3D',
-                              in_channels=numC_Trans*7,
-                              out_channels=numC_Trans),
-    pre_process=dict(
-        type='CustomResNet3D',
-        numC_input=numC_Trans,
-        with_cp=False,
-        num_layer=[1,],
-        num_channels=[numC_Trans,],
-        stride=[1,],
-        backbone_output_ids=[0,]),
+    # img_bev_encoder_backbone=dict(
+    #     type='CustomResNet3D',
+    #     numC_input=numC_Trans * (len(range(*multi_adj_frame_id_cfg))+1),
+    #     num_layer=[1, 2, 4],
+    #     with_cp=False,
+    #     num_channels=[numC_Trans,numC_Trans*2,numC_Trans*4],
+    #     stride=[1,2,2],
+    #     backbone_output_ids=[0,1,2]),
+    # img_bev_encoder_neck=dict(type='LSSFPN3D',
+    #                           in_channels=numC_Trans*7,
+    #                           out_channels=numC_Trans),
+    # pre_process=dict(
+    #     type='CustomResNet3D',
+    #     numC_input=numC_Trans,
+    #     with_cp=False,
+    #     num_layer=[1,],
+    #     num_channels=[numC_Trans,],
+    #     stride=[1,],
+    #     backbone_output_ids=[0,]),
     loss_occ=dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,
