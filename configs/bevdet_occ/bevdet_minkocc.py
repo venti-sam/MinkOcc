@@ -48,43 +48,43 @@ model = dict(
     dataset_type = 'nuscenes',
     num_adj=len(range(*multi_adj_frame_id_cfg)),
     # add in lidar minkunet here 
-    lidar_backbone = dict(
-        type='TR3DMinkResNet',
-        in_channels=5,
-        depth=18,
-        pool = False,
-        num_stages = 4,
-        in_planes = 16,
-        norm='batch',
-        num_planes=(32, 64, 128, 256)
-    ),
-    # add in lidar minkunet neck here 
-    lidar_neck = dict(
-        type='TR3DNeck',
-        in_channels=(32, 64, 128, 256),
-        out_channels=32,
-        strides=(4, 8, 16, 32),  # Strides from the backbone
-        loss_bce_weight = 1.0,
-        is_generative=True
-    ),
+    # lidar_backbone = dict(
+    #     type='TR3DMinkResNet',
+    #     in_channels=5,
+    #     depth=18,
+    #     pool = False,
+    #     num_stages = 4,
+    #     in_planes = 16,
+    #     norm='batch',
+    #     num_planes=(32, 64, 128, 256)
+    # ),
+    # # add in lidar minkunet neck here 
+    # lidar_neck = dict(
+    #     type='TR3DNeck',
+    #     in_channels=(32, 64, 128, 256),
+    #     out_channels=32,
+    #     strides=(4, 8, 16, 32),  # Strides from the backbone
+    #     loss_bce_weight = 1.0,
+    #     is_generative=True
+    # ),
     
-    # add in voxelization code here, the method is derived from centerpoint.py (second)
-    pts_voxel_layer=dict(
-        max_num_points=20, 
-        point_cloud_range=point_cloud_range,
-        voxel_size=[0.4, 0.4, 0.4],  # xy size follow centerpoint
-        # max_voxels=(90000, 120000)),
-    ),
-    pts_voxel_encoder=dict(type='HardSimpleVFE', num_features=5),
+    # # add in voxelization code here, the method is derived from centerpoint.py (second)
+    # pts_voxel_layer=dict(
+    #     max_num_points=20, 
+    #     point_cloud_range=point_cloud_range,
+    #     voxel_size=[0.4, 0.4, 0.4],  # xy size follow centerpoint
+    #     # max_voxels=(90000, 120000)),
+    # ),
+    # pts_voxel_encoder=dict(type='HardSimpleVFE', num_features=5),
 
     
-    # add in sparse fusion (modelled from openoccupancy adaptive fusion)
-    sparse_fusion=dict(
-        type='SparseFusion',
-        out_channels=16,
-        img_in_channels=64,
-        pts_in_channels=32
-    ),
+    # # add in sparse fusion (modelled from openoccupancy adaptive fusion)
+    # sparse_fusion=dict(
+    #     type='SparseFusion',
+    #     out_channels=16,
+    #     img_in_channels=64,
+    #     pts_in_channels=32
+    # ),
     
     
     
@@ -122,51 +122,52 @@ model = dict(
                           stereo=True,
                           bias=5.),
         downsample=16),
+    
     ###########################################
     
     
     ######################################################
     # Multo- modal semantic segmentation
     # add in lidar minkunet here 
-    occ_backbone = dict(
-        type='TR3DMinkResNet',
-        in_channels=64,
-        depth=18,
-        pool = False,
-        num_stages = 4,
-        in_planes = 32, 
-        norm='batch',
-        num_planes=(64, 128, 256, 512)
-    ),
-    # add in lidar minkunet neck here 
-    occ_neck = dict(
-        type='TR3DNeck',
-        in_channels=(64, 128, 256, 512),
-        out_channels=32,
-        strides=(4, 8, 16, 32),  # Strides from the backbone
-        # loss_bce_weight = 1.0,
-        is_generative=False
-    ),
+    # occ_backbone = dict(
+    #     type='TR3DMinkResNet',
+    #     in_channels=64,
+    #     depth=18,
+    #     pool = False,
+    #     num_stages = 4,
+    #     in_planes = 32, 
+    #     norm='batch',
+    #     num_planes=(64, 128, 256, 512)
+    # ),
+    # # add in lidar minkunet neck here 
+    # occ_neck = dict(
+    #     type='TR3DNeck',
+    #     in_channels=(64, 128, 256, 512),
+    #     out_channels=32,
+    #     strides=(4, 8, 16, 32),  # Strides from the backbone
+    #     # loss_bce_weight = 1.0,
+    #     is_generative=False
+    # ),
     
-    # img_bev_encoder_backbone=dict(
-    #     type='CustomResNet3D',
-    #     numC_input=numC_Trans * (len(range(*multi_adj_frame_id_cfg))+1),
-    #     num_layer=[1, 2, 4],
-    #     with_cp=False,
-    #     num_channels=[numC_Trans,numC_Trans*2,numC_Trans*4],
-    #     stride=[1,2,2],
-    #     backbone_output_ids=[0,1,2]),
-    # img_bev_encoder_neck=dict(type='LSSFPN3D',
-    #                           in_channels=numC_Trans*7,
-    #                           out_channels=numC_Trans),
-    # pre_process=dict(
-    #     type='CustomResNet3D',
-    #     numC_input=numC_Trans,
-    #     with_cp=False,
-    #     num_layer=[1,],
-    #     num_channels=[numC_Trans,],
-    #     stride=[1,],
-    #     backbone_output_ids=[0,]),
+    img_bev_encoder_backbone=dict(
+        type='CustomResNet3D',
+        numC_input=numC_Trans * (len(range(*multi_adj_frame_id_cfg))+1),
+        num_layer=[1, 2, 4],
+        with_cp=False,
+        num_channels=[numC_Trans,numC_Trans*2,numC_Trans*4],
+        stride=[1,2,2],
+        backbone_output_ids=[0,1,2]),
+    img_bev_encoder_neck=dict(type='LSSFPN3D',
+                              in_channels=numC_Trans*7,
+                              out_channels=numC_Trans),
+    pre_process=dict(
+        type='CustomResNet3D',
+        numC_input=numC_Trans,
+        with_cp=False,
+        num_layer=[1,],
+        num_channels=[numC_Trans,],
+        stride=[1,],
+        backbone_output_ids=[0,]),
     loss_occ=dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,
@@ -241,7 +242,7 @@ test_pipeline = [
 ]
 
 input_modality = dict(
-    use_lidar=True,
+    use_lidar=False,
     use_camera=True,
     use_radar=False,
     use_map=False,
