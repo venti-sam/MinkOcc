@@ -666,6 +666,7 @@ class BEVStereo4DOCC(BEVStereo4D):
     def __init__(self,
                  loss_occ=None,
                  out_dim=32,
+                 dataset_type='nuscenes',
                  use_mask=False,
                  num_classes=18,
                  use_predicter=True,
@@ -723,7 +724,7 @@ class BEVStereo4DOCC(BEVStereo4D):
         """Test function without augmentaiton."""
         img_feats, _, _ = self.extract_feat(
             points, img=img, img_metas=img_metas, **kwargs)
-        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1)
+        occ_pred = self.final_conv(img_feats).permute(0, 4, 3, 2, 1)
         # bncdhw->bnwhdc
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
@@ -775,7 +776,8 @@ class BEVStereo4DOCC(BEVStereo4D):
         loss_depth = self.img_view_transformer.get_depth_loss(gt_depth, depth)
         losses['loss_depth'] = loss_depth
 
-        occ_pred = self.final_conv(img_feats[0]).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc
+        # print("img_feats shape:", img_feats.shape)
+        occ_pred = self.final_conv(img_feats).permute(0, 4, 3, 2, 1) # bncdhw->bnwhdc (bczyx -> bxyzc)
         if self.use_predicter:
             occ_pred = self.predicter(occ_pred)
         voxel_semantics = kwargs['voxel_semantics']

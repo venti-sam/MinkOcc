@@ -172,7 +172,7 @@ model = dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,
         loss_weight=1.0),
-    use_mask=False,
+    use_mask=True,
 )
 
 # Data
