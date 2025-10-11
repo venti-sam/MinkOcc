@@ -1,0 +1,72 @@
+version: "3.9"
+
+services:
+  minkocc-dev:
+    # Build configuration: points to the Dockerfile and passes build arguments.
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        # Pass host user's name, UID, and GID to the build process.
+        # This ensures files created in the container have the correct ownership on the host.
+        # Fallbacks are provided for CI/CD environments where these might not be set.
+        USERNAME: ${USER:-developer}
+        USER_ID: ${UID:-1000}
+        GROUP_ID: ${GID:-1000}
+        SPCONV_PKG: ${SPCONV_PKG:-spconv-cu117}
+    image: cyadestiny/minkocc-dev:v3.0
+    container_name: minkocc-dev
+    restart: unless-stopped
+
+    # --- Privileges & Host Integration ---
+    # These settings provide deep integration with the host system, which is
+    # often necessary for ML development (e.g., debugging, hardware access, GUI).
+    # WARNING: This significantly reduces container isolation and security.
+    privileged: true
+    
+    # MODIFICATION: Run the container using the UID and GID of the 'david' user.
+    # This ensures the container has permission to write to the mounted external drive
+    # without needing to change ownership of the entire dataset.
+    # user: "1003:1004"
+
+    pid: host
+    ipc: host
+    network_mode: host
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    cap_add:
+      - ALL
+
+    # --- GPU & Hardware Access ---
+    runtime: nvidia
+    gpus: all
+    # Increase shared memory size, crucial for PyTorch data loaders.
+    shm_size: 64g
+
+    working_dir: /workspace
+    tty: true # Keeps the container running for interactive use.
+
+    environment:
+      # Forward the DISPLAY variable for GUI applications.
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      # Ensure Python output is not buffered.
+      - PYTHONUNBUFFERED=1
+
+    volumes:
+      # Mount the nuscenes dataset from the external drive directly into the workspace.
+      # - /media/david/Expansion/Self_driving_datasets/nuscenes/data/sets/nuscenes:/workspace/data/nuscenes:rw 
+      - /media/david/mcx-lab-2TB/samuel_minkocc_nuscenes:/workspace/data/nuscenes:rw
+      # Mount the entire repository root directory into the container's workspace.
+      # 'delegated' can improve performance on macOS and Windows.
+      - ..:/workspace:delegated
+
+      # Mount specific subdirectories for models and results.
+      # NOTE: The ../data mount is removed as it's now handled by the specific nuscenes mount above.
+      - ../checkpoints:/workspace/checkpoints
+      - ../output:/workspace/output
+
+      # Mount sockets and devices for GUI forwarding and hardware access.
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /dev:/dev
