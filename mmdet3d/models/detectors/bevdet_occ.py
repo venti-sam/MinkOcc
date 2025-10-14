@@ -1746,3 +1746,267 @@ class MinkOccV3(DynamicMVXFasterRCNN):
         # --- END OF MODIFICATION ---
 
         return losses
+    
+@DETECTORS.register_module()
+class MinkOccV4(DynamicMVXFasterRCNN):
+    """
+    MinkOccV4 integrates a deformable attention-based fusion mechanism, inspired
+    by BEVFormer, to fuse sparse LiDAR features with dense multi-level image
+    features. This replaces the point-based fusion in the voxel encoder of
+    previous versions.
+    """
+    def __init__(self,
+                 fusion_cfg,  # New required argument for the fusion layer
+                 renderer_cfg=None,
+                 occ_backbone=None,
+                 occ_neck=None,
+                 out_dim=18,
+                 loss_bce_weight=None,
+                 loss_ce_weight=None,
+                 use_mask=False,
+                 dataset_type='nuscenes',
+                 freeze_layers=False,
+                 **kwargs):
+        # Call the parent constructor from DynamicMVXFasterRCNN
+        super(MinkOccV4, self).__init__(**kwargs)
+
+        # --- MinkOccV4 Specific Initializations ---
+        self.fusion_layer = builder.build_fusion_layer(fusion_cfg)
+        self.dataset_type = dataset_type
+        self.use_mask = use_mask
+        self.out_dim = out_dim
+
+        if self.dataset_type == 'nuscenes':
+            self.num_views = 6
+            self.num_classes = 18
+        elif self.dataset_type == 'waymo': # Assuming Waymo support might be added
+            self.num_views = 5
+            self.num_classes = 16
+        else:
+            raise ValueError(f"Unsupported dataset_type: {self.dataset_type}")
+
+        self.loss_ce_weight = loss_ce_weight
+        self.loss_bce_weight = loss_bce_weight
+
+        # The final prediction head after the 3D UNet
+        self.predicter = nn.Sequential(
+            ME.MinkowskiLinear(self.out_dim, self.out_dim * 2),
+            MinkowskiSoftplus(),
+            ME.MinkowskiLinear(self.out_dim * 2, self.num_classes),
+        )
+
+        # Coordinate grid for creating the target sparse tensor
+        x = torch.arange(200)
+        y = torch.arange(200)
+        z = torch.arange(16)
+        mesh_x, mesh_y, mesh_z = torch.meshgrid(x, y, z, indexing='ij')
+        self.register_buffer(
+            'COO_format_coords',
+            torch.stack([mesh_x.flatten(), mesh_y.flatten(), mesh_z.flatten()], dim=1),
+            persistent=False
+        )
+
+        # Build the 3D UNet (backbone and neck for occupancy)
+        self.occ_backbone = builder.build_backbone(occ_backbone)
+        self.occ_neck = builder.build_neck(occ_neck)
+
+        # Build the renderer for 2D supervision
+        self.renderer = builder.build_renderer(renderer_cfg) if renderer_cfg else None
+
+        if freeze_layers:
+            self.freeze_layers()
+
+    def freeze_layers(self):
+        """Freezes specific layers of the model for fine-tuning."""
+        for param in self.img_backbone.parameters():
+            param.requires_grad = False
+        for param in self.img_neck.parameters():
+            param.requires_grad = False
+        for param in self.pts_voxel_encoder.parameters():
+            param.requires_grad = False
+        print("--- Froze img_backbone, img_neck, and pts_voxel_encoder. ---")
+
+    def extract_feat(self, points, img, img_metas):
+        """
+        Extract features from images and points. This is the core of the
+        MinkOccV4 data flow.
+        """
+        # --- Step 1: Extract Dense Image Features ---
+        img_feats = self.extract_img_feat(img, img_metas)
+
+        # --- Step 2: Voxelize LiDAR points and get initial sparse features ---
+        voxels, coors = self.voxelize(points)
+        # Note: The voxel encoder here should NOT have a fusion layer.
+        # It only processes the initial LiDAR point features within each voxel.
+        voxel_features, feature_coors = self.pts_voxel_encoder(voxels, coors)
+
+        # --- Step 3: Fuse LiDAR and Image Features using Deformable Attention ---
+        # The fusion layer takes the initial sparse features and enhances them
+        # with information from the dense image features.
+        fused_features = self.fusion_layer(
+            occ_feats=voxel_features,
+            occ_coords=feature_coors,
+            img_feats=img_feats,
+            img_metas=img_metas
+        )
+
+        # The output of the fusion layer is the final set of features for
+        # the sparse tensor, ready for the 3D UNet.
+        return (img_feats, fused_features, feature_coors)
+    
+    @property
+    def with_renderer(self):
+        return hasattr(self, 'renderer') and self.renderer is not None
+
+    # The forward_train and simple_test methods are nearly identical to MinkOccV3,
+    # as the main architectural change is encapsulated within extract_feat.
+
+    def forward_train(self,
+                      points=None,
+                      img_metas=None,
+                      gt_bboxes_3d=None,
+                      gt_labels_3d=None,
+                      img=None,
+                      supervision_2d_mask=None,
+                      supervision_2d_conf=None,
+                      **kwargs):
+        
+        losses = dict()
+        gpu = points[0].device
+
+        # --- 1. Feature Extraction and Fusion ---
+        # This now calls the new MinkOccV4 data flow with deformable fusion.
+        img_feats, occ_feats, occ_coords = self.extract_feat(
+            points, img=img, img_metas=img_metas)
+
+        # --- 2. Prepare GT Targets ---
+        # This logic is identical to MinkOccV3
+        voxel_semantics = kwargs['voxel_semantics']
+        mask_camera = kwargs['mask_camera'].to(torch.bool)
+        if self.dataset_type == 'nuscenes' and self.use_mask:
+            voxel_semantics[mask_camera == 0] = 17
+        
+        coo_list_gt = [] 
+        semantics_list_gt = []
+        for b in range(voxel_semantics.shape[0]):
+            current_voxel_grid = voxel_semantics[b]
+            mask = current_voxel_grid != 17
+            coords = torch.argwhere(mask)
+            coo_list_gt.append(coords)
+            
+            all_feats = current_voxel_grid.view(-1, 1)
+            all_coords = self.COO_format_coords.to(gpu)
+            all_coords_and_feats = torch.cat([all_coords, all_feats], dim=1)
+            semantics_list_gt.append(all_coords_and_feats)
+
+        # --- 3. 3D UNet Forward Pass ---
+        # The input sparse tensor is now built from the FUSED features
+        if self.dataset_type == 'nuscenes':
+            occ_coords[:, 3] = 200 - occ_coords[:, 3]
+            occ_coords = occ_coords[:, [0, 2, 3, 1]]
+
+        occ_sparse_tensor = ME.SparseTensor(
+            features=occ_feats, 
+            coordinates=occ_coords,
+            device=occ_feats.device)
+        
+        cm = occ_sparse_tensor.coordinate_manager
+        target_key, _ = cm.insert_and_map(
+            ME.utils.batched_coordinates(coo_list_gt).to(occ_feats.device),
+            string_id="target",
+        )
+
+        intermediate_feats = self.occ_backbone(occ_sparse_tensor)
+        out_cls, targets, pts_feat = self.occ_neck(intermediate_feats, target_key)
+        
+        # --- 4. Calculate Losses ---
+        # This logic is identical to MinkOccV3
+        bce_loss = self.occ_neck.get_bce_loss(out_cls, targets)
+        losses['loss_bce'] = bce_loss * self.loss_bce_weight
+        
+        pts_feat = self.predicter(pts_feat)
+
+        if self.with_renderer:
+            render_losses = self.renderer(
+                pts_feat,
+                img_metas,
+                supervision_2d_mask,
+                supervision_2d_conf
+            )
+            losses.update(render_losses)
+
+        is_strong_sample = [meta.get('is_strong_supervision', False) for meta in img_metas]
+        strong_mask = torch.tensor(is_strong_sample, device=gpu)
+
+        ce_loss = self.occ_neck.get_ce_loss(
+            pts_feat, 
+            semantics_list_gt,
+            loss_mask=strong_mask
+        )
+        losses['loss_ce'] = ce_loss * self.loss_ce_weight
+
+        return losses
+
+    def simple_test(self, 
+                    points, 
+                    img_metas, 
+                    img, 
+                    **kwargs):
+        
+        gpu = points[0].device
+        # This now calls the new MinkOccV4 data flow with deformable fusion.
+        img_feats, occ_feats, occ_coords = self.extract_feat(
+            [points], img=img, img_metas=[img_metas])
+        
+        if self.dataset_type == 'nuscenes':
+            occ_coords[:, 3] = 200 - occ_coords[:, 3]
+            occ_coords = occ_coords[:, [0, 2, 3, 1]]
+
+        occ_sparse_tensor = ME.SparseTensor(
+            features=occ_feats, 
+            coordinates=occ_coords,
+            device=occ_feats.device)
+        
+        # The rest of the test logic is identical to MinkOccV3
+        voxel_semantics = kwargs['voxel_semantics']
+        mask_camera = kwargs['mask_camera'].to(torch.bool)
+        if self.dataset_type == 'nuscenes' and self.use_mask:
+            voxel_semantics[mask_camera == 0] = 17
+        
+        coo_list_gt = [] 
+        for b in range(voxel_semantics.shape[0]):
+            current_voxel_grid = voxel_semantics[b]
+            mask = current_voxel_grid != 17
+            coords = torch.argwhere(mask)
+            coo_list_gt.append(coords)
+        
+        cm = occ_sparse_tensor.coordinate_manager
+        target_key, _ = cm.insert_and_map(
+            ME.utils.batched_coordinates(coo_list_gt).to(occ_feats.device),
+            string_id="target",
+        )
+        
+        intermediate_feats = self.occ_backbone(occ_sparse_tensor)
+        _, _, pts_feat = self.occ_neck(intermediate_feats, target_key)
+        pts_feat = self.predicter(pts_feat)
+        
+        pred_coords, pred_feats = pts_feat.decomposed_coordinates_and_features
+        
+        grid = np.full((200, 200, 16), 17, dtype=np.uint8)
+            
+        for coords, feats in zip(pred_coords, pred_feats):
+            coords = coords.cpu().numpy()
+            class_predictions_gpu = feats.argmax(dim=1)
+            
+            in_bounds_mask = (
+                (coords[:, 0] >= 0) & (coords[:, 0] < 200) &
+                (coords[:, 1] >= 0) & (coords[:, 1] < 200) &
+                (coords[:, 2] >= 0) & (coords[:, 2] < 16)
+            )
+            
+            valid_coords = coords[in_bounds_mask]
+            valid_preds = class_predictions_gpu[in_bounds_mask]
+            
+            grid[valid_coords[:, 0], valid_coords[:, 1], valid_coords[:, 2]] = valid_preds.cpu().numpy().astype(np.uint8)
+        
+        return [grid]

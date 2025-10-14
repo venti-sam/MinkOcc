@@ -5,9 +5,10 @@ from .gen_keypoints import get_keypoints
 from .handle_objs import filter_outside_objs, handle_proj_objs
 from .mlp import MLP
 from .transformer import *
+from .transformer import SpatialCrossAttention
 from .grid_mask import GridMask
 
 __all__ = [
     'clip_sigmoid', 'MLP', 'get_edge_indices', 'filter_outside_objs',
-    'handle_proj_objs', 'get_keypoints', 'GridMask'
+    'handle_proj_objs', 'get_keypoints', 'GridMask', 'SpatialCrossAttention'
 ]

@@ -1,7 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from .base import Base3DDetector
 from .bevdet import BEVDepth4D, BEVDet, BEVDet4D, BEVDetTRT, BEVStereo4D
-from .bevdet_occ import BEVStereo4DOCC, BEVStereo4DOCC_MinkOcc, BEVStereo4DOCC_robotcycle, BEVStereo4DOCC_MinkOccV2, BEVStereo4DOCC_Gaussian, MinkOccV3
+from .bevdet_occ import BEVStereo4DOCC, BEVStereo4DOCC_MinkOcc, BEVStereo4DOCC_robotcycle, BEVStereo4DOCC_MinkOccV2, BEVStereo4DOCC_Gaussian, MinkOccV3, MinkOccV4
 from .centerpoint import CenterPoint
 from .dynamic_voxelnet import DynamicVoxelNet
 from .groupfree3dnet import GroupFree3DNet
@@ -21,5 +21,5 @@ __all__ = [
     'GroupFree3DNet', 'PointRCNN',
     'MinkSingleStage3DDetector', 'SASSD', 'BEVDet', 'BEVDet4D', 'BEVDepth4D',
     'BEVDetTRT', 'BEVStereo4D', 'BEVStereo4DOCC', 'BEVStereo4DOCC_MinkOcc', 'BEVStereo4DOCC_robotcycle'
-    , 'BEVStereo4DOCC_MinkOccV2', 'BEVStereo4DOCC_Gaussian', 'MinkOccV3'
+    , 'BEVStereo4DOCC_MinkOccV2', 'BEVStereo4DOCC_Gaussian', 'MinkOccV3', 'MinkOccV4'
 ,]
